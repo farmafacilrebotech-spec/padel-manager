@@ -27,6 +27,8 @@ const styles = `
 
   .app {
     min-height: 100vh;
+    display: flex;
+    flex-direction: column;
     background: var(--dark);
     background-image: 
       radial-gradient(ellipse 80% 40% at 50% -10%, rgba(0,230,118,0.07) 0%, transparent 60%),
@@ -36,16 +38,94 @@ const styles = `
 
   /* HEADER */
   .header {
-    padding: 20px 32px;
+    padding: 16px 32px;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
     border-bottom: 1px solid var(--border);
     background: rgba(10,10,10,0.95);
     position: sticky;
     top: 0;
     z-index: 100;
     backdrop-filter: blur(10px);
+  }
+  .rebotech-lockup {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    color: inherit;
+    flex-shrink: 0;
+    min-width: 0;
+  }
+  .rebotech-lockup:focus-visible {
+    outline: 2px solid var(--green);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  .rebotech-logo-img {
+    height: 36px;
+    width: auto;
+    max-width: 100px;
+    object-fit: contain;
+    flex-shrink: 0;
+    display: block;
+  }
+  .rebotech-logo-fallback {
+    font-size: 28px;
+    line-height: 1;
+    opacity: 0.85;
+  }
+  .rebotech-wordmark {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    line-height: 1.15;
+    gap: 1px;
+  }
+  .rebotech-name {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--text);
+  }
+  .rebotech-tag {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+  .header-tournament-mid {
+    flex: 1;
+    min-width: 140px;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 36px;
+  }
+  .header-event-logo {
+    height: 32px;
+    width: auto;
+    max-width: 80px;
+    object-fit: contain;
+    border-radius: 4px;
+  }
+  .header-event-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    letter-spacing: 2px;
+    color: var(--green);
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: min(360px, 32vw);
   }
   .logo {
     font-family: 'Bebas Neue', sans-serif;
@@ -116,7 +196,29 @@ const styles = `
   .nav-btn.active { background: var(--green); color: #000; font-weight: 600; }
 
   /* MAIN */
-  .main { padding: 32px; max-width: 1100px; margin: 0 auto; }
+  .main {
+    padding: 32px;
+    max-width: 1100px;
+    margin: 0 auto;
+    width: 100%;
+    flex: 1;
+  }
+
+  .app-footer {
+    margin-top: auto;
+    padding: 20px 24px 28px;
+    border-top: 1px solid var(--border);
+    text-align: center;
+  }
+  .app-footer p {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+    margin: 0;
+  }
+  .app-footer p + p {
+    margin-top: 4px;
+  }
 
   /* SECTION TITLE */
   .section-title {
@@ -454,6 +556,38 @@ const styles = `
   .counter-row { display: flex; align-items: center; gap: 8px; }
 
   .highlight-row td { background: rgba(0,230,118,0.04) !important; }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.65);
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    animation: fadeIn 0.2s ease;
+  }
+  .modal-panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    max-width: 480px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.45);
+    padding: 22px 24px;
+  }
+  .modal-panel h3 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    letter-spacing: 2px;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+  .modal-panel .modal-sub { font-size: 13px; color: var(--muted); margin-bottom: 18px; line-height: 1.4; }
+  .modal-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 22px; justify-content: flex-end; }
 `;
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -476,6 +610,32 @@ function clampPlayerLevel(nivel, activeLevels) {
   if (activeLevels.includes(nivel)) return nivel;
   if (activeLevels.includes("B")) return "B";
   return activeLevels[activeLevels.length - 1] || activeLevels[0];
+}
+
+/** Letra A–D o número 1…n según categorías activas (1 = primera categoría). */
+function parseNivelFlexible(raw, activeLevels) {
+  const t = String(raw ?? "").trim();
+  if (!t) return activeLevels[0];
+  const u = t.toUpperCase();
+  if (activeLevels.includes(u)) return u;
+  const n = parseInt(t, 10);
+  if (!Number.isNaN(n) && n >= 1 && n <= activeLevels.length) return activeLevels[n - 1];
+  return clampPlayerLevel(t, activeLevels);
+}
+
+function rehydratePairPlayerRefs(pairs, players) {
+  const byId = Object.fromEntries(players.map((p) => [p.id, p]));
+  return pairs.map((pair) => ({
+    ...pair,
+    p1: byId[pair.p1.id] ?? pair.p1,
+    p2: pair.p2 ? (byId[pair.p2.id] ?? pair.p2) : null,
+  }));
+}
+
+const MSG_NO_EDIT_GRUPOS = "No se pueden modificar parejas una vez iniciada la fase de grupos";
+
+function hasClasificacionPlayedResults(matches) {
+  return (matches || []).some((m) => m.phase === "clasificacion" && m.played);
 }
 
 const nivelOptionLabel = (lvl) => {
@@ -927,6 +1087,8 @@ function calcStandings(pairs, matches) {
 }
 
 const PDF_MARGIN = 14;
+/** Margen inferior del cuerpo respecto al pie (marca + nº página) */
+const PDF_BODY_BOTTOM_MM = 62;
 const PDF_PTS_GREEN = [0, 150, 72];
 /** Cabeceras tablas (informe deportivo) */
 const PDF_TABLE_HEAD_BG = [28, 35, 42];
@@ -1001,12 +1163,32 @@ function addPdfPageFooters(doc, margin = PDF_MARGIN) {
   const pageCount = doc.internal.getNumberOfPages();
   const pageHeight = doc.internal.pageSize.getHeight();
   const pageWidth = doc.internal.pageSize.getWidth();
-  doc.setFontSize(8);
-  doc.setTextColor(88, 88, 88);
   doc.setFont("helvetica", "normal");
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
+    doc.setFontSize(7.5);
+    doc.setTextColor(120, 125, 132);
+    doc.text("Generado por ReBoTech Solutions", pageWidth / 2, pageHeight - 16, { align: "center" });
+    doc.setFontSize(8);
+    doc.setTextColor(88, 88, 88);
     doc.text(`Pagina ${i} de ${pageCount}`, pageWidth - margin, pageHeight - 9, { align: "right" });
+  }
+}
+
+async function fetchPublicImageAsDataUrl(path) {
+  try {
+    const r = await fetch(path);
+    if (!r.ok) return "";
+    const blob = await r.blob();
+    if (!blob.type || !/^image\//i.test(blob.type)) return "";
+    return await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result || ""));
+      fr.onerror = reject;
+      fr.readAsDataURL(blob);
+    });
+  } catch {
+    return "";
   }
 }
 
@@ -1041,6 +1223,7 @@ function buildPdfScheduleSections(matches, activeLevels) {
 async function exportClasificacionPdf(standings, branding, activeLevels, matches = []) {
   const displayTitle = pdfSafeText((branding?.tournamentName ?? "").trim() || "PADEL MANAGER");
   const logoDataUrl = branding?.logoDataUrl ?? "";
+  const rebotechDataUrl = await fetchPublicImageAsDataUrl("/ReBoTech_logo.jpg");
 
   const doc = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
@@ -1055,28 +1238,44 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
   paintWhitePage();
   doc.setTextColor(0, 0, 0);
 
-  let y = m;
-  const logoBox = logoDataUrl ? await getPdfLogoSizeMm(logoDataUrl, 38, 22) : null;
-  if (logoBox) {
+  const eventLogoBox = logoDataUrl ? await getPdfLogoSizeMm(logoDataUrl, 34, 18) : null;
+  const rebotechBox = rebotechDataUrl ? await getPdfLogoSizeMm(rebotechDataUrl, 36, 14) : null;
+
+  let headerH = 10;
+  if (rebotechBox) {
     try {
-      doc.addImage(logoDataUrl, logoBox.format, pageW - m - logoBox.w, m, logoBox.w, logoBox.h);
+      doc.addImage(rebotechDataUrl, rebotechBox.format, m, m, rebotechBox.w, rebotechBox.h);
+      headerH = Math.max(headerH, rebotechBox.h);
+    } catch {
+      /* PNG/JPEG en PDF */
+    }
+  }
+  if (eventLogoBox) {
+    try {
+      doc.addImage(logoDataUrl, eventLogoBox.format, pageW - m - eventLogoBox.w, m, eventLogoBox.w, eventLogoBox.h);
+      headerH = Math.max(headerH, eventLogoBox.h);
     } catch {
       /* PNG/JPEG en PDF; SVG se omite */
     }
   }
 
-  const titleText = `${displayTitle} - Clasificacion`;
   doc.setFont("helvetica", "bold");
   let titleSize = 16;
   doc.setFontSize(titleSize);
-  const maxTitleW = pageW - 2 * m - (logoBox ? logoBox.w + 4 : 0);
-  while (titleSize > 9 && doc.getTextWidth(titleText) > maxTitleW) {
+  const titleBaseline = m + headerH / 2 + 2;
+  const maxTitleW = pageW - 2 * m - 8;
+  while (titleSize > 9 && doc.getTextWidth(displayTitle) > maxTitleW) {
     titleSize -= 0.5;
     doc.setFontSize(titleSize);
   }
   doc.setTextColor(15, 18, 22);
-  doc.text(titleText, m, y + 4);
-  y += 8;
+  doc.text(displayTitle, pageW / 2, titleBaseline, { align: "center" });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(75, 78, 84);
+  doc.text("Clasificacion", pageW / 2, titleBaseline + 5.5, { align: "center" });
+
+  let y = Math.max(m + headerH + 6, titleBaseline + 12);
   doc.setDrawColor(...PDF_LINE_SUBTLE);
   doc.setLineWidth(0.35);
   doc.line(m, y + 1, pageW - m, y + 1);
@@ -1118,7 +1317,7 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
       }
       startedAnyTable = true;
 
-      if (y > pageH - 55) {
+      if (y > pageH - PDF_BODY_BOTTOM_MM) {
         doc.addPage();
         paintWhitePage();
         doc.setTextColor(0, 0, 0);
@@ -1199,7 +1398,8 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
   if (schedSections.length) {
     let ySch = y + 4;
     const bumpPage = (needed = 48) => {
-      if (ySch > pageH - needed) {
+      const reserve = Math.max(needed, PDF_BODY_BOTTOM_MM - 6);
+      if (ySch > pageH - reserve) {
         doc.addPage();
         paintWhitePage();
         doc.setTextColor(0, 0, 0);
@@ -1361,6 +1561,7 @@ export default function App() {
   });
   const [tournamentName, setTournamentName] = useState("");
   const [logoDataUrl, setLogoDataUrl] = useState("");
+  const [rebotechLogoBroken, setRebotechLogoBroken] = useState(false);
   const logoFileRef = useRef(null);
   const [form, setForm] = useState({
     nombre: "", apellidos: "", telefono: "", empresa: "", email: "", nivel: "B", pairWith: "",
@@ -1370,6 +1571,10 @@ export default function App() {
   const [manualPairs, setManualPairs] = useState(null);
   const [editingPairs, setEditingPairs] = useState(false);
   const [pairEditDraft, setPairEditDraft] = useState(null);
+  /** Modal editar jugador / pareja / composición / intercambio */
+  const [playerPairEditModal, setPlayerPairEditModal] = useState(null);
+  const [startGruposModal, setStartGruposModal] = useState(null);
+  const [resetGruposModalOpen, setResetGruposModalOpen] = useState(false);
 
   const activeLevels = getActiveLevels(config.levelCount);
 
@@ -1549,6 +1754,10 @@ export default function App() {
   };
 
   const handleDeletePlayer = (id) => {
+    if (tournamentStarted && groupPhaseStarted) {
+      showToast(MSG_NO_EDIT_GRUPOS);
+      return;
+    }
     setPlayers((prev) => prev.filter((p) => p.id !== id));
   };
 
@@ -1572,9 +1781,15 @@ export default function App() {
     setTab("cruces");
   };
 
-  const beginGruposPhase = () => {
+  const openStartGruposModal = () => {
     const pending = matches.filter((m) => m.phase === "clasificacion" && !m.played).length;
-    if (pending > 0 && !confirm(`Quedan ${pending} partida(s) de clasificación sin resultado. ¿Iniciar la fase de grupos?`)) return;
+    setStartGruposModal({ pending });
+  };
+
+  const executeBeginGruposPhase = () => {
+    setStartGruposModal(null);
+    setEditingPairs(false);
+    setPairEditDraft(null);
     setGroupPhaseStarted(true);
     showToast("Fase de grupos iniciada");
     setMatches((ms) => {
@@ -1582,6 +1797,33 @@ export default function App() {
       const grouped = assignJornadasToPhase(generateGroupMatches(pairs), config.courts);
       return [...cls, ...grouped];
     });
+  };
+
+  const executeResetGroupPhase = () => {
+    setResetGruposModalOpen(false);
+    setGroupPhaseStarted(false);
+    setMatches((ms) => {
+      const cls = ms.filter((m) => m.phase === "clasificacion");
+      return assignJornadasToPhase(cls, config.courts);
+    });
+    showToast("Fase de grupos reiniciada. Puedes editar parejas de nuevo.");
+  };
+
+  const requestPairStructureEdit = (fn) => {
+    if (tournamentStarted && groupPhaseStarted) {
+      showToast(MSG_NO_EDIT_GRUPOS);
+      return;
+    }
+    if (tournamentStarted && hasClasificacionPlayedResults(matches)) {
+      if (
+        !confirm(
+          "Hay resultados guardados en clasificación. Modificar parejas puede alterar el calendario. ¿Continuar?"
+        )
+      ) {
+        return;
+      }
+    }
+    fn();
   };
 
   const movePairLevel = (pairId, delta) => {
@@ -1611,6 +1853,10 @@ export default function App() {
   };
 
   const beginEditPairs = () => {
+    if (tournamentStarted && groupPhaseStarted) {
+      showToast(MSG_NO_EDIT_GRUPOS);
+      return;
+    }
     if (tournamentStarted) {
       if (!confirm("Se regenerarán todos los partidos y se perderán los resultados guardados. ¿Continuar?")) return;
     }
@@ -1679,6 +1925,267 @@ export default function App() {
     setEditingPairs(false);
     setPairEditDraft(null);
     showToast("✅ Parejas confirmadas");
+  };
+
+  const closePlayerPairEditModal = () => setPlayerPairEditModal(null);
+
+  const patchPlayerPairEditDraft = (patch) => {
+    setPlayerPairEditModal((prev) =>
+      prev ? { ...prev, draft: { ...prev.draft, ...patch } } : prev
+    );
+  };
+
+  const openEditPairComposition = (pairId) => {
+    requestPairStructureEdit(() => {
+      const list = tournamentStarted ? pairs : previewPairsPreStart;
+      const pair = list.find((p) => p.id === pairId);
+      if (!pair) return;
+      setPlayerPairEditModal({
+        kind: "pairComposition",
+        pairId,
+        draft: {
+          p1Id: pair.p1.id,
+          p2Id: pair.p2?.id ?? "",
+          level: pair.level,
+        },
+      });
+    });
+  };
+
+  const openSwapPlayersModal = (preselectPlayerId) => {
+    if (!tournamentStarted) {
+      showToast("Intercambiar jugadores solo está disponible durante el torneo (fase de clasificación).");
+      return;
+    }
+    requestPairStructureEdit(() => {
+      setPlayerPairEditModal({
+        kind: "swapPlayers",
+        draft: { aId: preselectPlayerId || "", bId: "" },
+      });
+    });
+  };
+
+  const openEditPlayerModal = (playerId) => {
+    if (tournamentStarted && groupPhaseStarted) {
+      showToast(MSG_NO_EDIT_GRUPOS);
+      return;
+    }
+    const p = players.find((x) => x.id === playerId);
+    if (!p) return;
+    setPlayerPairEditModal({
+      kind: "player",
+      playerId,
+      draft: {
+        nombre: p.nombre ?? "",
+        apellidos: p.apellidos ?? "",
+        nivel: clampPlayerLevel(p.nivel, activeLevels),
+      },
+    });
+  };
+
+  const commitPairCompositionSave = () => {
+    const mod = playerPairEditModal;
+    if (!mod || mod.kind !== "pairComposition") return;
+    const { pairId, draft } = mod;
+    const p1Id = draft.p1Id;
+    const p2Id = String(draft.p2Id ?? "").trim();
+    if (!p1Id) {
+      showToast("⚠️ Elige jugador 1");
+      return;
+    }
+    if (p2Id && p1Id === p2Id) {
+      showToast("⚠️ Los dos jugadores no pueden ser la misma persona");
+      return;
+    }
+    const P1 = players.find((p) => p.id === p1Id);
+    const P2 = p2Id ? players.find((p) => p.id === p2Id) : null;
+    if (!P1) return;
+    const list = tournamentStarted ? pairs : previewPairsPreStart;
+    const occupied = new Set();
+    list.forEach((pr) => {
+      if (pr.id === pairId) return;
+      occupied.add(pr.p1.id);
+      if (pr.p2) occupied.add(pr.p2.id);
+    });
+    if (occupied.has(p1Id) || (P2 && occupied.has(P2.id))) {
+      showToast("⚠️ Un jugador no puede estar en dos parejas a la vez");
+      return;
+    }
+    const newLevel = clampPlayerLevel(parseNivelFlexible(draft.level, activeLevels), activeLevels);
+
+    setPlayers((prev) =>
+      prev.map((p) => {
+        if (p.id === p1Id || (P2 && p.id === P2.id)) return { ...p, nivel: newLevel };
+        return p;
+      })
+    );
+
+    const nextPlayersBase = players.map((p) => {
+      if (p.id === p1Id || (P2 && p.id === P2.id)) return { ...p, nivel: newLevel };
+      return p;
+    });
+    const P1b = nextPlayersBase.find((p) => p.id === p1Id) ?? P1;
+    const P2b = P2 ? nextPlayersBase.find((p) => p.id === P2.id) : null;
+
+    if (!tournamentStarted) {
+      setManualPairs((mp) => {
+        const base = mp ?? previewPairsPreStart;
+        return base.map((pr) =>
+          pr.id === pairId ? { ...pr, p1: P1b, p2: P2b, level: newLevel } : pr
+        );
+      });
+      closePlayerPairEditModal();
+      showToast("✅ Pareja actualizada");
+      return;
+    }
+
+    setPairs((prev) => {
+      const next = prev.map((pr) =>
+        pr.id === pairId ? { ...pr, p1: P1b, p2: P2b, level: newLevel } : pr
+      );
+      queueMicrotask(() => {
+        setMatches(assignJornadasToPhase(generateClasificacionMatches(next), config.courts));
+      });
+      return next;
+    });
+    closePlayerPairEditModal();
+    showToast("✅ Pareja actualizada");
+  };
+
+  const commitSwapPlayersSave = () => {
+    const mod = playerPairEditModal;
+    if (!mod || mod.kind !== "swapPlayers") return;
+    const aId = mod.draft.aId;
+    const bId = mod.draft.bId;
+    if (!aId || !bId || aId === bId) {
+      showToast("⚠️ Selecciona dos jugadores distintos");
+      return;
+    }
+    function locate(pl, pid) {
+      for (const pr of pl) {
+        if (pr.p1.id === pid) return { pairId: pr.id, k: "p1" };
+        if (pr.p2?.id === pid) return { pairId: pr.id, k: "p2" };
+      }
+      return null;
+    }
+    const la = locate(pairs, aId);
+    const lb = locate(pairs, bId);
+    if (!la || !lb) {
+      showToast("⚠️ Jugadores no encontrados en las parejas");
+      return;
+    }
+    const getP = (id) => players.find((x) => x.id === id);
+
+    setPairs((prev) => {
+      const next = prev.map((pr) => ({ ...pr }));
+      if (la.pairId === lb.pairId) {
+        const pr = next.find((p) => p.id === la.pairId);
+        if (pr && pr.p2 && la.k !== lb.k) {
+          const t = pr.p1;
+          pr.p1 = pr.p2;
+          pr.p2 = t;
+        }
+      } else {
+        const pa = next.find((p) => p.id === la.pairId);
+        const pb = next.find((p) => p.id === lb.pairId);
+        const playerA = getP(aId);
+        const playerB = getP(bId);
+        pa[la.k] = playerB;
+        pb[lb.k] = playerA;
+      }
+      queueMicrotask(() => {
+        setMatches(assignJornadasToPhase(generateClasificacionMatches(next), config.courts));
+      });
+      return next;
+    });
+    closePlayerPairEditModal();
+    showToast("✅ Intercambio aplicado");
+  };
+
+  const savePlayerPairEditModal = () => {
+    const mod = playerPairEditModal;
+    if (!mod) return;
+
+    if (mod.kind === "player") {
+      if (tournamentStarted && groupPhaseStarted) {
+        showToast(MSG_NO_EDIT_GRUPOS);
+        return;
+      }
+      const { playerId, draft } = mod;
+      setPlayers((prev) => {
+        const cur = prev.find((p) => p.id === playerId);
+        if (!cur) {
+          queueMicrotask(closePlayerPairEditModal);
+          return prev;
+        }
+        const wantLevel = clampPlayerLevel(parseNivelFlexible(draft.nivel, activeLevels), activeLevels);
+        const curLevel = clampPlayerLevel(cur.nivel, activeLevels);
+        if (groupPhaseStarted && wantLevel !== curLevel) {
+          showToast("No se puede cambiar el nivel una vez iniciada la fase de grupos");
+          return prev;
+        }
+        const next = prev.map((p) =>
+          p.id === playerId
+            ? {
+                ...p,
+                nombre: draft.nombre.trim(),
+                apellidos: draft.apellidos.trim(),
+                ...(!groupPhaseStarted ? { nivel: wantLevel } : {}),
+              }
+            : p
+        );
+
+        queueMicrotask(() => {
+          if (tournamentStarted) {
+            setPairs((prevPairs) => {
+              const nextPairs = prevPairs.map((pr) => {
+                const p1 = next.find((x) => x.id === pr.p1.id) ?? pr.p1;
+                const p2 = pr.p2 ? next.find((x) => x.id === pr.p2.id) ?? pr.p2 : null;
+                const base = { ...pr, p1, p2 };
+                if (groupPhaseStarted) return base;
+                if (base.p1.id === playerId || base.p2?.id === playerId) {
+                  return { ...base, level: clampPlayerLevel(base.p1.nivel, activeLevels) };
+                }
+                return base;
+              });
+              const oldPr = prevPairs.find((pr) => pr.p1.id === playerId || pr.p2?.id === playerId);
+              const newPr = nextPairs.find((pr) => pr.id === oldPr?.id);
+              const levelChanged =
+                !groupPhaseStarted && !!oldPr && !!newPr && oldPr.level !== newPr.level;
+
+              setMatches((prevM) => {
+                if (tournamentStarted && !groupPhaseStarted && levelChanged) {
+                  return assignJornadasToPhase(generateClasificacionMatches(nextPairs), config.courts);
+                }
+                return syncMatchPairRefs(prevM, nextPairs);
+              });
+              return nextPairs;
+            });
+          } else {
+            setManualPairs((mp) => {
+              const base = mp ?? previewPairsPreStart;
+              return base.map((pr) => {
+                const p1 = next.find((x) => x.id === pr.p1.id) ?? pr.p1;
+                const p2 = pr.p2 ? next.find((x) => x.id === pr.p2.id) ?? pr.p2 : null;
+                const basePr = { ...pr, p1, p2 };
+                if (groupPhaseStarted) return basePr;
+                if (basePr.p1.id === playerId || basePr.p2?.id === playerId) {
+                  return {
+                    ...basePr,
+                    level: clampPlayerLevel(basePr.p1.nivel, activeLevels),
+                  };
+                }
+                return basePr;
+              });
+            });
+          }
+          closePlayerPairEditModal();
+          showToast("✅ Cambios guardados");
+        });
+
+        return next;
+      });
+    }
   };
 
   const playerOptionLabel = (p) =>
@@ -1818,20 +2325,36 @@ export default function App() {
       <style>{styles}</style>
       <div className="app">
         <header className="header">
-          <div className="logo header-brand">
-            {logoDataUrl ? (
-              <img src={logoDataUrl} alt="" className="header-logo-img" />
+          <div className="rebotech-lockup" aria-label="ReBoTech Solutions">
+            {!rebotechLogoBroken ? (
+              <img
+                src="/ReBoTech_logo.jpg"
+                alt=""
+                className="rebotech-logo-img"
+                width={100}
+                height={36}
+                onError={() => setRebotechLogoBroken(true)}
+              />
             ) : (
-              <span className="logo-icon">🎾</span>
-            )}
-            {(tournamentName || "").trim() ? (
-              <span className="logo-title-custom" title={(tournamentName || "").trim()}>
-                {(tournamentName || "").trim()}
+              <span className="logo-icon rebotech-logo-fallback" aria-hidden>
+                🎾
               </span>
+            )}
+            <span className="rebotech-wordmark">
+              <span className="rebotech-name">ReBoTech</span>
+              <span className="rebotech-tag">Solutions</span>
+            </span>
+          </div>
+          <div className="header-tournament-mid" title={(tournamentName || "").trim() || undefined}>
+            {logoDataUrl ? (
+              <img src={logoDataUrl} alt="" className="header-event-logo" />
+            ) : null}
+            {(tournamentName || "").trim() ? (
+              <span className="header-event-title">{(tournamentName || "").trim()}</span>
             ) : (
-              <>
-                PÁDEL<span>MANAGER</span>
-              </>
+              <span className="header-event-title" style={{ color: "var(--muted)", letterSpacing: "0.15em", fontSize: "18px" }}>
+                PÁDEL MANAGER
+              </span>
             )}
           </div>
           <nav className="nav">
@@ -1936,10 +2459,18 @@ export default function App() {
                             {p.telefono && <span> · {p.telefono}</span>}
                           </div>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                           <span className={`badge badge-${clampPlayerLevel(p.nivel, activeLevels)}`}>
                             {clampPlayerLevel(p.nivel, activeLevels)}
                           </span>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            disabled={tournamentStarted && groupPhaseStarted}
+                            onClick={() => openEditPlayerModal(p.id)}
+                          >
+                            Editar
+                          </button>
                           <button type="button" className="btn-danger" onClick={() => handleDeletePlayer(p.id)}>✕</button>
                         </div>
                       </div>
@@ -1960,7 +2491,34 @@ export default function App() {
           {/* ── CRUCES ──────────────────────────────────────────────── */}
           {tab === "cruces" && (
             <div className="tab-content">
-              <div className="section-title">Cruces y Partidas</div>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: 12,
+                  marginBottom: 8,
+                }}
+              >
+                <div className="section-title" style={{ marginBottom: 0 }}>
+                  Cruces y Partidas
+                </div>
+                {tournamentStarted ? (
+                  <span
+                    className="group-badge"
+                    style={{
+                      fontSize: 13,
+                      padding: "6px 14px",
+                      border: "1px solid var(--border)",
+                      borderRadius: 20,
+                      color: "var(--text)",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Fase: {groupPhaseStarted ? "Grupos" : "Clasificación"}
+                  </span>
+                ) : null}
+              </div>
               <div className="section-sub">Introduce los resultados de cada partida</div>
 
               {!tournamentStarted && players.length < 2 ? (
@@ -2023,7 +2581,7 @@ export default function App() {
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 10, marginBottom: 16 }}>
                     {previewPairsPreStart.map((pair) => (
                       <div className="card" key={pair.id} style={{ padding: "14px 18px", marginBottom: 0 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                           <div>
                             <div style={{ fontWeight: 600, fontSize: 13 }}>{pair.p1.nombre} {pair.p1.apellidos}</div>
                             {pair.p2 ? (
@@ -2032,7 +2590,17 @@ export default function App() {
                               <div style={{ fontSize: 12, color: "var(--muted)" }}>Sin pareja asignada</div>
                             )}
                           </div>
-                          <span className={`badge badge-${pair.level}`}>{pair.level}</span>
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+                            <span className={`badge badge-${pair.level}`}>{pair.level}</span>
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              style={{ padding: "6px 12px", fontSize: 12 }}
+                              onClick={() => openEditPairComposition(pair.id)}
+                            >
+                              Editar pareja
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -2100,9 +2668,34 @@ export default function App() {
                   </div>
 
                   <div className="actions-row" style={{ marginBottom: 8 }}>
-                    <button type="button" className="btn-secondary" onClick={beginEditPairs}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => {
+                        if (groupPhaseStarted) {
+                          showToast(MSG_NO_EDIT_GRUPOS);
+                          return;
+                        }
+                        beginEditPairs();
+                      }}
+                    >
                       ✏️ Editar parejas
                     </button>
+                    {!groupPhaseStarted ? (
+                      <button type="button" className="btn-secondary" onClick={() => openSwapPlayersModal()}>
+                        Intercambiar jugador
+                      </button>
+                    ) : null}
+                    {groupPhaseStarted ? (
+                      <button
+                        type="button"
+                        className="btn-danger"
+                        style={{ border: "1px solid rgba(255,87,34,0.5)" }}
+                        onClick={() => setResetGruposModalOpen(true)}
+                      >
+                        Reiniciar fase de grupos
+                      </button>
+                    ) : null}
                   </div>
 
                   {/* Pairs overview */}
@@ -2110,13 +2703,31 @@ export default function App() {
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 10, marginBottom: 8 }}>
                     {pairs.filter(p => p.p2).map((pair) => (
                       <div className="card" key={pair.id} style={{ padding: "14px 18px", marginBottom: 0 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                           <div>
                             <div style={{ fontWeight: 600, fontSize: 13 }}>{pair.p1.nombre} {pair.p1.apellidos}</div>
                             <div style={{ fontWeight: 600, fontSize: 13, color: "var(--muted)" }}>{pair.p2.nombre} {pair.p2.apellidos}</div>
                             {pair.p1.empresa && <div style={{ fontSize: 11, color: "#444", marginTop: 3 }}>{pair.p1.empresa}</div>}
                           </div>
-                          <span className={`badge badge-${pair.level}`}>{pair.level}</span>
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+                            <span className={`badge badge-${pair.level}`}>{pair.level}</span>
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              style={{ padding: "6px 12px", fontSize: 12 }}
+                              onClick={() => openEditPairComposition(pair.id)}
+                            >
+                              Editar pareja
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              style={{ padding: "6px 12px", fontSize: 12 }}
+                              onClick={() => openSwapPlayersModal(pair.p1.id)}
+                            >
+                              Intercambiar
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -2143,7 +2754,7 @@ export default function App() {
                                     {idx >= 0 && <span style={{ marginLeft: 8 }}>({nivelOptionLabel(pair.level)})</span>}
                                   </div>
                                 </div>
-                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                                   <button
                                     type="button"
                                     className="btn-secondary"
@@ -2160,6 +2771,20 @@ export default function App() {
                                   >
                                     Bajar nivel
                                   </button>
+                                  <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    onClick={() => openEditPairComposition(pair.id)}
+                                  >
+                                    Editar pareja
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    onClick={() => openSwapPlayersModal(pair.p1.id)}
+                                  >
+                                    Intercambiar
+                                  </button>
                                 </div>
                               </div>
                             </div>
@@ -2174,8 +2799,8 @@ export default function App() {
                     <div className="info-box" style={{ marginBottom: 16 }}>
                       Calentamiento: cada pareja disputa 1 o 2 partidas de prueba contra rivales del mismo nivel. Luego puedes reclasificar e iniciar grupos.
                       <div className="actions-row" style={{ marginTop: 12, marginBottom: 0 }}>
-                        <button type="button" className="btn-primary" onClick={beginGruposPhase}>
-                          Iniciar fase de grupos
+                        <button type="button" className="btn-primary" onClick={openStartGruposModal}>
+                            Iniciar fase de grupos
                         </button>
                       </div>
                     </div>
@@ -2580,6 +3205,266 @@ export default function App() {
             </div>
           )}
         </main>
+
+        <footer className="app-footer">
+          <p>Powered by ReBoTech Solutions</p>
+          <p>
+            <a href="mailto:rebotech.solutions@gmail.com" style={{ color: "inherit", textDecoration: "none" }}>
+              rebotech.solutions@gmail.com
+            </a>
+            {" | Valencia, España"}
+          </p>
+        </footer>
+
+        {startGruposModal ? (
+          <div
+            className="modal-backdrop"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setStartGruposModal(null)}
+          >
+            <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+              <h3 id="start-grupos-title">Iniciar fase de grupos</h3>
+              <p className="modal-sub">
+                A partir de aquí no podrás modificar parejas, jugadores de pareja ni niveles hasta que reinicies esta fase.
+              </p>
+              {startGruposModal.pending > 0 ? (
+                <div className="info-box" style={{ marginBottom: 14 }}>
+                  Quedan <strong>{startGruposModal.pending}</strong> partida
+                  {startGruposModal.pending !== 1 ? "s" : ""} de clasificación sin resultado.
+                </div>
+              ) : null}
+              <div className="modal-actions">
+                <button type="button" className="btn-secondary" onClick={() => setStartGruposModal(null)}>
+                  Cancelar
+                </button>
+                <button type="button" className="btn-primary" onClick={executeBeginGruposPhase}>
+                  Iniciar fase de grupos
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {resetGruposModalOpen ? (
+          <div
+            className="modal-backdrop"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setResetGruposModalOpen(false)}
+          >
+            <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+              <h3>Reiniciar fase de grupos</h3>
+              <p className="modal-sub">
+                Se eliminarán todos los partidos y resultados de la fase de grupos. La clasificación previa se mantiene.
+                ¿Continuar?
+              </p>
+              <div className="modal-actions">
+                <button type="button" className="btn-secondary" onClick={() => setResetGruposModalOpen(false)}>
+                  Cancelar
+                </button>
+                <button type="button" className="btn-danger" onClick={executeResetGroupPhase}>
+                  Reiniciar fase de grupos
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {playerPairEditModal && (
+          <div
+            className="modal-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-modal-title"
+            onClick={closePlayerPairEditModal}
+          >
+            <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+              {playerPairEditModal.kind === "player" ? (
+                <>
+                  <h3 id="edit-modal-title">Editar jugador</h3>
+                  <p className="modal-sub">Nombre, apellidos y categoría de juego.</p>
+                  {groupPhaseStarted ? (
+                    <div className="info-box" style={{ marginBottom: 14 }}>
+                      {MSG_NO_EDIT_GRUPOS}
+                    </div>
+                  ) : null}
+                  <div className="form-group">
+                    <label htmlFor="edit-pl-nombre">Nombre</label>
+                    <input
+                      id="edit-pl-nombre"
+                      value={playerPairEditModal.draft.nombre}
+                      onChange={(e) => patchPlayerPairEditDraft({ nombre: e.target.value })}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="edit-pl-apellidos">Apellidos</label>
+                    <input
+                      id="edit-pl-apellidos"
+                      value={playerPairEditModal.draft.apellidos}
+                      onChange={(e) => patchPlayerPairEditDraft({ apellidos: e.target.value })}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="edit-pl-nivel">Nivel (categoría)</label>
+                    <select
+                      id="edit-pl-nivel"
+                      value={playerPairEditModal.draft.nivel}
+                      disabled={groupPhaseStarted}
+                      onChange={(e) => patchPlayerPairEditDraft({ nivel: e.target.value })}
+                    >
+                      {activeLevels.map((lvl) => (
+                        <option key={lvl} value={lvl}>{nivelOptionLabel(lvl)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {!groupPhaseStarted ? (
+                    <div className="form-group">
+                      <label htmlFor="edit-pl-nivel-free">O escribe letra o número (1 = categoría más alta)</label>
+                      <input
+                        id="edit-pl-nivel-free"
+                        type="text"
+                        placeholder="Ej: B o 2"
+                        onBlur={(e) => {
+                          const t = e.target.value.trim();
+                          if (!t) return;
+                          patchPlayerPairEditDraft({ nivel: parseNivelFlexible(t, activeLevels) });
+                        }}
+                        autoComplete="off"
+                      />
+                    </div>
+                  ) : null}
+                  <div className="modal-actions">
+                    <button type="button" className="btn-secondary" onClick={closePlayerPairEditModal}>
+                      Cancelar
+                    </button>
+                    <button type="button" className="btn-primary" onClick={savePlayerPairEditModal}>
+                      Guardar
+                    </button>
+                  </div>
+                </>
+              ) : playerPairEditModal.kind === "pairComposition" ? (
+                <>
+                  <h3 id="edit-modal-title">Editar pareja</h3>
+                  <p className="modal-sub">
+                    Asigna jugadores desde la lista inscrita y la categoría de la pareja.
+                  </p>
+                  <div className="form-group">
+                    <label htmlFor="edit-pc-p1">Jugador 1</label>
+                    <select
+                      id="edit-pc-p1"
+                      value={playerPairEditModal.draft.p1Id}
+                      onChange={(e) => patchPlayerPairEditDraft({ p1Id: e.target.value })}
+                    >
+                      <option value="">— Elegir —</option>
+                      {players.map((p) => (
+                        <option key={p.id} value={p.id}>{playerOptionLabel(p)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="edit-pc-p2">Jugador 2</label>
+                    <select
+                      id="edit-pc-p2"
+                      value={playerPairEditModal.draft.p2Id}
+                      onChange={(e) => patchPlayerPairEditDraft({ p2Id: e.target.value })}
+                    >
+                      <option value="">— Sin pareja —</option>
+                      {players.map((p) => (
+                        <option key={p.id} value={p.id}>{playerOptionLabel(p)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="edit-pc-level">Categoría (nivel de la pareja)</label>
+                    <select
+                      id="edit-pc-level"
+                      value={playerPairEditModal.draft.level}
+                      onChange={(e) => patchPlayerPairEditDraft({ level: e.target.value })}
+                    >
+                      {activeLevels.map((lvl) => (
+                        <option key={lvl} value={lvl}>{nivelOptionLabel(lvl)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="edit-pc-level-free">O letra / número (1 = más alto)</label>
+                    <input
+                      id="edit-pc-level-free"
+                      type="text"
+                      placeholder="Ej: B o 2"
+                      onBlur={(e) => {
+                        const t = e.target.value.trim();
+                        if (!t) return;
+                        patchPlayerPairEditDraft({ level: parseNivelFlexible(t, activeLevels) });
+                      }}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="modal-actions">
+                    <button type="button" className="btn-secondary" onClick={closePlayerPairEditModal}>
+                      Cancelar
+                    </button>
+                    <button type="button" className="btn-primary" onClick={commitPairCompositionSave}>
+                      Guardar
+                    </button>
+                  </div>
+                </>
+              ) : playerPairEditModal.kind === "swapPlayers" ? (
+                <>
+                  <h3 id="edit-modal-title">Intercambiar jugador</h3>
+                  <p className="modal-sub">
+                    Elige dos jugadores distintos que estén en parejas: intercambian su posición (entre parejas o pareja 1↔2).
+                  </p>
+                  <div className="form-group">
+                    <label htmlFor="edit-sw-a">Jugador A</label>
+                    <select
+                      id="edit-sw-a"
+                      value={playerPairEditModal.draft.aId}
+                      onChange={(e) => patchPlayerPairEditDraft({ aId: e.target.value })}
+                    >
+                      <option value="">— Elegir —</option>
+                      {pairs.flatMap((pr) => {
+                        const opts = [{ p: pr.p1, key: `${pr.id}-p1` }];
+                        if (pr.p2) opts.push({ p: pr.p2, key: `${pr.id}-p2` });
+                        return opts;
+                      }).map(({ p, key }) => (
+                        <option key={key} value={p.id}>{playerOptionLabel(p)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="edit-sw-b">Jugador B</label>
+                    <select
+                      id="edit-sw-b"
+                      value={playerPairEditModal.draft.bId}
+                      onChange={(e) => patchPlayerPairEditDraft({ bId: e.target.value })}
+                    >
+                      <option value="">— Elegir —</option>
+                      {pairs.flatMap((pr) => {
+                        const opts = [{ p: pr.p1, key: `${pr.id}-p1b` }];
+                        if (pr.p2) opts.push({ p: pr.p2, key: `${pr.id}-p2b` });
+                        return opts;
+                      }).map(({ p, key }) => (
+                        <option key={key} value={p.id}>{playerOptionLabel(p)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="modal-actions">
+                    <button type="button" className="btn-secondary" onClick={closePlayerPairEditModal}>
+                      Cancelar
+                    </button>
+                    <button type="button" className="btn-primary" onClick={commitSwapPlayersSave}>
+                      Intercambiar
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </div>
+          </div>
+        )}
 
         {toast && <div className="toast">{toast}</div>}
       </div>
