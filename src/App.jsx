@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, startTransition } from "react";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { loadPdfFonts } from "../lib/pdf/fonts.js";
 
 // ─── STYLES ───────────────────────────────────────────────────────────────────
 const styles = `
@@ -645,7 +646,7 @@ const nivelOptionLabel = (lvl) => {
   return "D — 4ª categoría";
 };
 
-/** Texto solo ASCII imprimible para jsPDF (sin emojis ni fuera de Latin basico) */
+/** Texto solo ASCII imprimible (legacy / fuentes sin UTF-8). */
 function pdfSafeText(s) {
   return String(s ?? "")
     .normalize("NFD")
@@ -655,7 +656,17 @@ function pdfSafeText(s) {
     .replace(/[^\x20-\x7E]/g, "");
 }
 
-const levelPdfShort = { A: "Alto", B: "Medio", C: "Bajo", D: "4a categoria" };
+/**
+ * Texto para PDF con fuente Roboto: conserva tildes y ñ; elimina controles y emojis amplios.
+ */
+function pdfUtf8Text(s) {
+  return String(s ?? "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .replace(/[\uD800-\uDFFF]/g, "")
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}]/gu, "");
+}
+
+const levelPdfShort = { A: "Alto", B: "Medio", C: "Bajo", D: "4ª categoría" };
 
 const MATCH_FORMAT_LABELS = {
   "1set": "1 set",
@@ -1086,6 +1097,7 @@ function calcStandings(pairs, matches) {
   return byLevel;
 }
 
+const PDF_FONT = "Roboto";
 const PDF_MARGIN = 17;
 /** Margen inferior del cuerpo respecto al pie (marca + nº página) */
 const PDF_BODY_BOTTOM_MM = 50;
@@ -1093,6 +1105,20 @@ const PDF_BODY_BOTTOM_MM = 50;
 const PDF_BLOCK_GAP_MM = 4;
 /** Tras tabla / bloque antes del siguiente */
 const PDF_AFTER_TABLE_MM = 4;
+/** Espacio antes del título de sección */
+const PDF_SECTION_TITLE_BEFORE_MM = 3;
+/** Tras la línea bajo el título de sección */
+const PDF_SECTION_TITLE_AFTER_MM = 5;
+/** Altura reservada al planificar salto antes de dibujar un banner de sección */
+const PDF_SECTION_BANNER_PLAN_MM =
+  PDF_SECTION_TITLE_BEFORE_MM + 6 + PDF_SECTION_TITLE_AFTER_MM;
+
+/** Si no cabe `neededMm` desde `y`, abre página y devuelve Y de cabecera; si cabe, devuelve `y`. */
+function pdfCheckPageBreak(y, neededMm, pageH, openPageFn) {
+  const limit = pageH - PDF_BODY_BOTTOM_MM;
+  if (y + neededMm <= limit + 0.25) return y;
+  return openPageFn();
+}
 const PDF_PTS_GREEN = [0, 150, 72];
 /** Cabeceras tablas (informe deportivo) */
 const PDF_TABLE_HEAD_BG = [28, 35, 42];
@@ -1105,8 +1131,8 @@ const PDF_LINE_SUBTLE = [218, 220, 224];
 
 function pairPdfLabel(pair) {
   const a = `${pair.p1.nombre} ${pair.p1.apellidos}`.trim();
-  if (pair.p2) return pdfSafeText(`${a} / ${pair.p2.nombre} ${pair.p2.apellidos}`.trim());
-  return pdfSafeText(`${a} (sin pareja)`);
+  if (pair.p2) return pdfUtf8Text(`${a} / ${pair.p2.nombre} ${pair.p2.apellidos}`.trim());
+  return pdfUtf8Text(`${a} (sin pareja)`);
 }
 
 /** Marcador listo para PDF: nunca "1-" / "-1"; sin resultado → "-" */
@@ -1124,7 +1150,7 @@ function pdfMatchResultLabel(m) {
   if (!pdfMatchScoreComplete(m)) return "-";
   const n1 = parseInt(String(m.score1).trim(), 10);
   const n2 = parseInt(String(m.score2).trim(), 10);
-  return pdfSafeText(`${n1} - ${n2}`);
+  return pdfUtf8Text(`${n1} - ${n2}`);
 }
 
 function pdfImageFormat(dataUrl) {
@@ -1167,38 +1193,22 @@ function addPdfPageFooters(doc, margin = PDF_MARGIN) {
   const pageCount = doc.internal.getNumberOfPages();
   const pageHeight = doc.internal.pageSize.getHeight();
   const pageWidth = doc.internal.pageSize.getWidth();
-  doc.setFont("helvetica", "normal");
+  doc.setFont(PDF_FONT, "normal");
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-  
-    // Línea 1
     doc.setFontSize(7.5);
     doc.setTextColor(120, 125, 132);
-    doc.text(
-      "Generado por ReBoTech Solutions",
-      pageWidth / 2,
-      pageHeight - 16,
-      { align: "center" }
-    );
-  
-    // Línea 2
-    doc.setFontSize(7.5);
+    doc.text("Powered by ReBoTech Solutions", pageWidth / 2, pageHeight - 16, { align: "center" });
     doc.text(
       "rebotech.solutions@gmail.com | Valencia, España",
       pageWidth / 2,
       pageHeight - 12,
       { align: "center" }
     );
-  
-    // Número de página
     doc.setFontSize(8);
     doc.setTextColor(88, 88, 88);
-    doc.text(
-      `Página ${i} de ${pageCount}`,
-      pageWidth - margin,
-      pageHeight - 8,
-      { align: "right" }
-    );
+    doc.setFont(PDF_FONT, "normal");
+    doc.text(`Página ${i} de ${pageCount}`, pageWidth - margin, pageHeight - 8, { align: "right" });
   }
 }
 
@@ -1247,7 +1257,7 @@ function drawPdfReportHeader(doc, h) {
   }
   const titleY = m + headerImgH / 2 - 1;
   let titleSize = 15;
-  doc.setFont("helvetica", "bold");
+  doc.setFont(PDF_FONT, "bold");
   doc.setFontSize(titleSize);
   const maxTw = pageW - 2 * m - 14;
   while (titleSize > 10 && doc.getTextWidth(displayTitle) > maxTw) {
@@ -1256,7 +1266,7 @@ function drawPdfReportHeader(doc, h) {
   }
   doc.setTextColor(18, 22, 28);
   doc.text(displayTitle, pageW / 2, titleY, { align: "center" });
-  doc.setFont("helvetica", "normal");
+  doc.setFont(PDF_FONT, "normal");
   doc.setFontSize(9);
   doc.setTextColor(88, 92, 98);
   doc.text(dateLine, pageW / 2, titleY + 5.2, { align: "center" });
@@ -1264,14 +1274,16 @@ function drawPdfReportHeader(doc, h) {
 }
 
 function drawPdfSectionBanner(doc, pageW, m, y, title) {
-  doc.setFont("helvetica", "bold");
+  y += PDF_SECTION_TITLE_BEFORE_MM;
+  const textY = y;
+  doc.setFont(PDF_FONT, "bold");
   doc.setFontSize(16);
   doc.setTextColor(20, 24, 30);
-  doc.text(pdfSafeText(title), pageW / 2, y, { align: "center" });
+  doc.text(pdfUtf8Text(title), pageW / 2, textY, { align: "center" });
   doc.setDrawColor(...PDF_LINE_SUBTLE);
   doc.setLineWidth(0.4);
-  doc.line(m + 10, y + 3, pageW - m - 10, y + 3);
-  return y + 12;
+  doc.line(m + 10, textY + 3, pageW - m - 10, textY + 3);
+  return textY + 3 + PDF_SECTION_TITLE_AFTER_MM;
 }
 
 /** Altura aproximada del bloque tabla de calendario (cabecera + filas), sin título de jornada */
@@ -1301,7 +1313,7 @@ function pdfClasificacionTableBody(rows) {
   return rows.map((row, i) => [
     String(i + 1),
     pairPdfLabel(row.pair),
-    pdfSafeText(row.pair.p1.empresa || "-"),
+    pdfUtf8Text(row.pair.p1.empresa || "-"),
     String(row.played),
     String(row.won),
     String(row.drawn),
@@ -1314,6 +1326,7 @@ function pdfClasificacionTableBody(rows) {
 
 function pdfScheduleDidParseForRows(rowAccessor) {
   return (data) => {
+    data.cell.styles.font = PDF_FONT;
     if (data.section !== "body") return;
     const mm = rowAccessor(data.row.index);
     if (!mm) return;
@@ -1362,7 +1375,7 @@ function pdfScheduleDidParseForRows(rowAccessor) {
 
 function pdfDrawMatchScheduleTable(doc, round, startY, m, fontPt = 8.5) {
   const scheduleBody = round.rows.map((mm) => [
-    pdfSafeText(mm.level),
+    pdfUtf8Text(mm.level),
     pairPdfLabel(mm.pair1),
     pairPdfLabel(mm.pair2),
     pdfMatchResultLabel(mm),
@@ -1374,6 +1387,8 @@ function pdfDrawMatchScheduleTable(doc, round, startY, m, fontPt = 8.5) {
     body: scheduleBody,
     theme: "plain",
     styles: {
+      font: PDF_FONT,
+      fontStyle: "normal",
       fontSize: fontPt,
       cellPadding: { top: 1.7, bottom: 1.7, left: 1.8, right: 1.8 },
       textColor: [22, 24, 28],
@@ -1383,9 +1398,10 @@ function pdfDrawMatchScheduleTable(doc, round, startY, m, fontPt = 8.5) {
       valign: "middle",
     },
     headStyles: {
+      font: PDF_FONT,
+      fontStyle: "bold",
       fillColor: PDF_TABLE_HEAD_BG,
       textColor: PDF_TABLE_HEAD_TEXT,
-      fontStyle: "bold",
       cellPadding: { top: 2.4, bottom: 2.4, left: 1.8, right: 1.8 },
     },
     alternateRowStyles: { fillColor: PDF_ROW_ALT },
@@ -1441,19 +1457,19 @@ function pdfRenderJornadaRounds(doc, rounds, y0, m, pageW, pageH, openPageHeader
     const round = rounds[i];
     if (bannerDrawn && i > 0) y += PDF_BLOCK_GAP_MM;
 
-    const bannerH = !bannerDrawn ? 12 : 0;
+    const bannerH = !bannerDrawn ? PDF_SECTION_BANNER_PLAN_MM : 0;
     let fontPt = shrinkFontForHeight(round.rows.length, fullColumnH - bannerH);
     let blockH = estimateJornadaBlockMm(round.rows.length, fontPt);
     let needed = bannerH + blockH;
 
     while (y + needed > bottom + 0.35) {
       y = openPageHeaderOnly();
-      if (!bannerDrawn) needed = 12 + estimateJornadaBlockMm(round.rows.length, fontPt);
+      if (!bannerDrawn) needed = PDF_SECTION_BANNER_PLAN_MM + estimateJornadaBlockMm(round.rows.length, fontPt);
       else needed = estimateJornadaBlockMm(round.rows.length, fontPt);
       while (y + needed > bottom + 0.35 && fontPt > 6) {
         fontPt -= 0.5;
         blockH = estimateJornadaBlockMm(round.rows.length, fontPt);
-        needed = (!bannerDrawn ? 12 : 0) + blockH;
+        needed = (!bannerDrawn ? PDF_SECTION_BANNER_PLAN_MM : 0) + blockH;
       }
     }
 
@@ -1468,10 +1484,10 @@ function pdfRenderJornadaRounds(doc, rounds, y0, m, pageW, pageH, openPageHeader
       }
     }
 
-    doc.setFont("helvetica", "bold");
+    doc.setFont(PDF_FONT, "bold");
     doc.setFontSize(10.5);
     doc.setTextColor(36, 42, 50);
-    doc.text(pdfSafeText(`Jornada ${round.jornada}`), m, y);
+    doc.text(pdfUtf8Text(`Jornada ${round.jornada}`), m, y);
     y += 6;
 
     y = pdfDrawMatchScheduleTable(doc, round, y, m, fontPt);
@@ -1481,13 +1497,13 @@ function pdfRenderJornadaRounds(doc, rounds, y0, m, pageW, pageH, openPageHeader
 }
 
 async function exportClasificacionPdf(standings, branding, activeLevels, matches = []) {
-  const displayTitle = pdfSafeText((branding?.tournamentName ?? "").trim() || "PADEL MANAGER");
+  const displayTitle = pdfUtf8Text((branding?.tournamentName ?? "").trim() || "Pádel Manager");
   const logoDataUrl = branding?.logoDataUrl ?? "";
   const rebotechDataUrl = await fetchPublicImageAsDataUrl("/ReBoTech_logo.jpg");
   const eventLogoBox = logoDataUrl ? await getPdfLogoSizeMm(logoDataUrl, 32, 17) : null;
   const rebotechBox = rebotechDataUrl ? await getPdfLogoSizeMm(rebotechDataUrl, 36, 14) : null;
 
-  const dateLine = pdfSafeText(
+  const dateLine = pdfUtf8Text(
     new Date().toLocaleDateString("es-ES", {
       weekday: "long",
       year: "numeric",
@@ -1497,6 +1513,7 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
   );
 
   const doc = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
+  loadPdfFonts(doc);
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const m = PDF_MARGIN;
@@ -1525,17 +1542,17 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
   const maxPdfColH = bottomLimit - m - 26;
   const headClasif = [["Pos", "Pareja", "Empresa", "PJ", "G", "E", "P", "GF", "GC", "Pts"]];
 
-  // --- Seccion 1: Clasificacion (solo tablas por nivel; sin calendarios ni jornadas) ---
+  // --- Sección 1: Clasificación ---
   let y = openPage();
-  y = drawPdfSectionBanner(doc, pageW, m, y, "Clasificacion");
+  y = drawPdfSectionBanner(doc, pageW, m, y, "Clasificación");
   const hasStandings = activeLevels.some((lvl) => standings[lvl]?.length);
 
   if (!hasStandings) {
-    doc.setFont("helvetica", "italic");
+    doc.setFont(PDF_FONT, "normal");
     doc.setFontSize(10.5);
     doc.setTextColor(95, 98, 104);
     doc.text(
-      "No hay datos de clasificacion (sin resultados en fase de grupos o fase no iniciada).",
+      "No hay datos de clasificación (sin resultados en fase de grupos o fase no iniciada).",
       m,
       y
     );
@@ -1553,6 +1570,11 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
         tblFont -= 0.5;
         needH = estimateClasifTableHeightMm(rows.length, tblFont);
       }
+      y = pdfCheckPageBreak(y, needH, pageH, openPage);
+      while (y + needH > bottomLimit + 0.35 && tblFont > 6) {
+        tblFont -= 0.5;
+        needH = estimateClasifTableHeightMm(rows.length, tblFont);
+      }
       while (y + needH > bottomLimit + 0.35) {
         y = openPage();
         while (y + needH > bottomLimit + 0.35 && tblFont > 6) {
@@ -1561,10 +1583,10 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
         }
       }
 
-      doc.setFont("helvetica", "bold");
+      doc.setFont(PDF_FONT, "bold");
       doc.setFontSize(10.5);
       doc.setTextColor(32, 38, 46);
-      doc.text(pdfSafeText(`Nivel ${lvl} (${levelPdfShort[lvl] ?? lvl})`), m, y);
+      doc.text(pdfUtf8Text(`Nivel ${lvl} (${levelPdfShort[lvl] ?? lvl})`), m, y);
       y += 6;
 
       autoTable(doc, {
@@ -1573,6 +1595,8 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
         body: pdfClasificacionTableBody(rows),
         theme: "plain",
         styles: {
+          font: PDF_FONT,
+          fontStyle: "normal",
           fontSize: tblFont,
           cellPadding: { top: 1.7, bottom: 1.7, left: 1.4, right: 1.4 },
           textColor: [22, 24, 28],
@@ -1582,9 +1606,10 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
           valign: "middle",
         },
         headStyles: {
+          font: PDF_FONT,
+          fontStyle: "bold",
           fillColor: PDF_TABLE_HEAD_BG,
           textColor: PDF_TABLE_HEAD_TEXT,
-          fontStyle: "bold",
           halign: "center",
           cellPadding: { top: 2.4, bottom: 2.4, left: 1.4, right: 1.4 },
         },
@@ -1607,6 +1632,7 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
         rowPageBreak: "avoid",
         showHead: "everyPage",
         didParseCell: (data) => {
+          data.cell.styles.font = PDF_FONT;
           if (data.section === "body") {
             if (data.column.index === 0 && data.row.index < 3) data.cell.styles.fontStyle = "bold";
             if (data.column.index === 1 && data.row.index < 3) data.cell.styles.fontStyle = "bold";
@@ -1617,69 +1643,57 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
     }
   }
 
-  // --- Seccion 2: Fase de grupos (bloque completo por nivel; sin nueva pagina forzada) ---
+  // --- Sección 2: Fase de grupos (nueva página; bloque completo por nivel) ---
   const byLvlGroup = groupMatchesByLevelForPdf(matches, activeLevels);
   const hasAnyGroup = activeLevels.some((lvl) => byLvlGroup[lvl]?.length);
   if (hasAnyGroup) {
-    let sec2BannerPlaced = false;
+    y = openPage();
+    y = drawPdfSectionBanner(doc, pageW, m, y, "Fase de grupos");
     let levelOrdinal = 0;
     for (const lvl of activeLevels) {
       const gRows = byLvlGroup[lvl] || [];
       if (!gRows.length) continue;
       if (levelOrdinal++ > 0) y += PDF_BLOCK_GAP_MM;
 
-      const bannerH = !sec2BannerPlaced ? 12 : 0;
       let fontPt = 8.5;
       let blockEst = estimateGroupLevelBlockMm(gRows.length, fontPt);
-      let needed = bannerH + blockEst;
-
-      while (needed > maxPdfColH && fontPt > 6) {
+      while (blockEst > maxPdfColH && fontPt > 6) {
         fontPt -= 0.5;
         blockEst = estimateGroupLevelBlockMm(gRows.length, fontPt);
-        needed = bannerH + blockEst;
       }
-
-      while (y + needed > bottomLimit + 0.35) {
-        y = openPage();
-        if (!sec2BannerPlaced) needed = 12 + estimateGroupLevelBlockMm(gRows.length, fontPt);
-        else needed = estimateGroupLevelBlockMm(gRows.length, fontPt);
-        while (y + needed > bottomLimit + 0.35 && fontPt > 6) {
-          fontPt -= 0.5;
-          blockEst = estimateGroupLevelBlockMm(gRows.length, fontPt);
-          needed = (!sec2BannerPlaced ? 12 : 0) + blockEst;
-        }
-      }
-
-      if (!sec2BannerPlaced) {
-        y = drawPdfSectionBanner(doc, pageW, m, y, "Fase de grupos");
-        sec2BannerPlaced = true;
-        fontPt = 8.5;
+      y = pdfCheckPageBreak(y, blockEst, pageH, openPage);
+      while (y + blockEst > bottomLimit + 0.35 && fontPt > 6) {
+        fontPt -= 0.5;
         blockEst = estimateGroupLevelBlockMm(gRows.length, fontPt);
+      }
+      while (y + blockEst > bottomLimit + 0.35) {
+        y = openPage();
         while (y + blockEst > bottomLimit + 0.35 && fontPt > 6) {
           fontPt -= 0.5;
           blockEst = estimateGroupLevelBlockMm(gRows.length, fontPt);
         }
       }
 
-      doc.setFont("helvetica", "bold");
+      doc.setFont(PDF_FONT, "bold");
       doc.setFontSize(10.5);
       doc.setTextColor(32, 38, 46);
-      doc.text(pdfSafeText(`Nivel ${lvl} — Calendario completo (${gRows.length} partidos)`), m, y);
+      doc.text(pdfUtf8Text(`Nivel ${lvl} — Calendario completo (${gRows.length} partidos)`), m, y);
       y += 6;
 
-      const pseudoRound = { rows: gRows };
-      y = pdfDrawMatchScheduleTable(doc, pseudoRound, y, m, fontPt);
+      y = pdfDrawMatchScheduleTable(doc, { rows: gRows }, y, m, fontPt);
       y += PDF_AFTER_TABLE_MM;
     }
   }
 
   const clRounds = buildJornadaRounds(matches, "clasificacion", activeLevels).filter((r) => r.jornada > 0);
   if (clRounds.length) {
-    y = pdfRenderJornadaRounds(doc, clRounds, y, m, pageW, pageH, openPage, "Jornadas - Clasificacion");
+    y = openPage();
+    y = pdfRenderJornadaRounds(doc, clRounds, y, m, pageW, pageH, openPage, "Jornadas - Clasificación");
   }
 
   const grRounds = buildJornadaRounds(matches, "group", activeLevels).filter((r) => r.jornada > 0);
   if (grRounds.length) {
+    y = openPage();
     y = pdfRenderJornadaRounds(doc, grRounds, y, m, pageW, pageH, openPage, "Jornadas - Fase de grupos");
   }
 
@@ -2459,7 +2473,7 @@ export default function App() {
   const TABS = [
     { key: "inscripcion", label: "📋 Inscripción" },
     { key: "cruces", label: "⚔️ Cruces" },
-    { key: "clasificacion", label: "🏆 Clasificación" },
+    { key: "clasificacion", label: "🏆 Ranking" },
     { key: "config", label: "⚙️ Configuración" },
   ];
 
@@ -2582,7 +2596,7 @@ export default function App() {
               {/* Player list */}
               {players.length === 0 ? (
                 <div className="empty-state">
-                  <div className="icon">🎾</div>
+                  {/*<div className="icon">🎾</div> */}
                   <h3>Sin jugadores aún</h3>
                   <p style={{ marginTop: 8, fontSize: 14 }}>Añade jugadores usando el formulario de arriba</p>
                 </div>
