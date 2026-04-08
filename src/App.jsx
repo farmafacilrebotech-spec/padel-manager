@@ -517,6 +517,38 @@ function matchPhaseLabel(phase) {
   return String(phase || "");
 }
 
+/**
+ * Normaliza un marcador tipo "a-b" (cadena única o procedente de unir dos campos).
+ * @param {string} score
+ * @returns {string}
+ */
+function normalizeScore(score) {
+  const raw = String(score ?? "").trim();
+  if (raw === "" || raw === "-") return "0-0";
+
+  const hyphenIdx = raw.indexOf("-");
+  if (hyphenIdx === -1) {
+    const l = parseInt(raw, 10);
+    if (Number.isNaN(l) || l < 0) return "0-0";
+    return `${l}-0`;
+  }
+
+  const left = raw.slice(0, hyphenIdx).trim();
+  const right = raw.slice(hyphenIdx + 1).trim();
+  const l = left === "" ? 0 : parseInt(left, 10);
+  const r = right === "" ? 0 : parseInt(right, 10);
+  const ln = Number.isNaN(l) || l < 0 ? 0 : l;
+  const rn = Number.isNaN(r) || r < 0 ? 0 : r;
+  return `${ln}-${rn}`;
+}
+
+function normalizedScoresFromFields(score1, score2) {
+  const combined = `${String(score1 ?? "").trim()}-${String(score2 ?? "").trim()}`;
+  const norm = normalizeScore(combined);
+  const i = norm.indexOf("-");
+  return { score1: norm.slice(0, i), score2: norm.slice(i + 1) };
+}
+
 function syncMatchPairRefs(matches, pairs) {
   const map = new Map(pairs.map((p) => [p.id, p]));
   return matches.map((m) => ({
@@ -896,11 +928,37 @@ function calcStandings(pairs, matches) {
 
 const PDF_MARGIN = 14;
 const PDF_PTS_GREEN = [0, 150, 72];
+/** Cabeceras tablas (informe deportivo) */
+const PDF_TABLE_HEAD_BG = [28, 35, 42];
+const PDF_TABLE_HEAD_TEXT = [255, 255, 255];
+/** Ganador partido en calendario PDF */
+const PDF_WIN_GREEN = [0, 128, 72];
+const PDF_TEXT_MUTED = [105, 105, 110];
+const PDF_ROW_ALT = [247, 248, 250];
+const PDF_LINE_SUBTLE = [218, 220, 224];
 
 function pairPdfLabel(pair) {
   const a = `${pair.p1.nombre} ${pair.p1.apellidos}`.trim();
   if (pair.p2) return pdfSafeText(`${a} / ${pair.p2.nombre} ${pair.p2.apellidos}`.trim());
   return pdfSafeText(`${a} (sin pareja)`);
+}
+
+/** Marcador listo para PDF: nunca "1-" / "-1"; sin resultado → "-" */
+function pdfMatchScoreComplete(m) {
+  const s1 = String(m?.score1 ?? "").trim();
+  const s2 = String(m?.score2 ?? "").trim();
+  if (s1 === "" || s2 === "") return false;
+  const n1 = parseInt(s1, 10);
+  const n2 = parseInt(s2, 10);
+  if (Number.isNaN(n1) || Number.isNaN(n2) || n1 < 0 || n2 < 0) return false;
+  return true;
+}
+
+function pdfMatchResultLabel(m) {
+  if (!pdfMatchScoreComplete(m)) return "-";
+  const n1 = parseInt(String(m.score1).trim(), 10);
+  const n2 = parseInt(String(m.score2).trim(), 10);
+  return pdfSafeText(`${n1} - ${n2}`);
 }
 
 function pdfImageFormat(dataUrl) {
@@ -1009,17 +1067,23 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
 
   const titleText = `${displayTitle} - Clasificacion`;
   doc.setFont("helvetica", "bold");
-  let titleSize = 15;
+  let titleSize = 16;
   doc.setFontSize(titleSize);
   const maxTitleW = pageW - 2 * m - (logoBox ? logoBox.w + 4 : 0);
   while (titleSize > 9 && doc.getTextWidth(titleText) > maxTitleW) {
     titleSize -= 0.5;
     doc.setFontSize(titleSize);
   }
+  doc.setTextColor(15, 18, 22);
   doc.text(titleText, m, y + 4);
-  y += 10;
+  y += 8;
+  doc.setDrawColor(...PDF_LINE_SUBTLE);
+  doc.setLineWidth(0.35);
+  doc.line(m, y + 1, pageW - m, y + 1);
+  y += 8;
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
+  doc.setFontSize(9);
+  doc.setTextColor(75, 78, 84);
   doc.text(
     pdfSafeText(
       new Date().toLocaleDateString("es-ES", {
@@ -1033,6 +1097,7 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
     y
   );
   y += 12;
+  doc.setTextColor(0, 0, 0);
 
   const head = [["Pos", "Pareja", "Empresa", "PJ", "G", "E", "P", "GF", "GC", "Pts"]];
   const hasRows = activeLevels.some((lvl) => standings[lvl]?.length);
@@ -1049,7 +1114,7 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
       if (!rows?.length) continue;
 
       if (startedAnyTable) {
-        y = doc.lastAutoTable.finalY + 12;
+        y = doc.lastAutoTable.finalY + 16;
       }
       startedAnyTable = true;
 
@@ -1061,9 +1126,10 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
       }
 
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text(`Nivel ${lvl} - ${levelPdfShort[lvl] ?? lvl}`, m, y);
-      y += 7;
+      doc.setFontSize(10);
+      doc.setTextColor(28, 35, 42);
+      doc.text(`Tabla — Nivel ${lvl} (${levelPdfShort[lvl] ?? lvl})`, m, y);
+      y += 8;
 
       autoTable(doc, {
         startY: y,
@@ -1080,23 +1146,27 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
           String(row.ga),
           String(row.pts),
         ]),
-        theme: "grid",
+        theme: "plain",
         styles: {
-          fontSize: 8,
-          cellPadding: 1.5,
-          textColor: [0, 0, 0],
+          fontSize: 8.5,
+          cellPadding: { top: 2, bottom: 2, left: 1.5, right: 1.5 },
+          textColor: [22, 24, 28],
           fillColor: [255, 255, 255],
-          lineColor: [190, 190, 190],
-          lineWidth: 0.05,
+          lineColor: PDF_LINE_SUBTLE,
+          lineWidth: 0.08,
+          valign: "middle",
         },
         headStyles: {
-          fillColor: [240, 240, 240],
-          textColor: [0, 0, 0],
+          fillColor: PDF_TABLE_HEAD_BG,
+          textColor: PDF_TABLE_HEAD_TEXT,
           fontStyle: "bold",
+          halign: "center",
+          cellPadding: { top: 2.5, bottom: 2.5, left: 1.5, right: 1.5 },
         },
+        alternateRowStyles: { fillColor: PDF_ROW_ALT },
         columnStyles: {
           0: { halign: "center", cellWidth: 10 },
-          1: { cellWidth: 52 },
+          1: { cellWidth: 52, fontStyle: "normal" },
           2: { cellWidth: 30 },
           3: { halign: "center", cellWidth: 9 },
           4: { halign: "center", cellWidth: 9 },
@@ -1107,79 +1177,166 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
           9: { halign: "center", cellWidth: 15, textColor: PDF_PTS_GREEN, fontStyle: "bold" },
         },
         margin: { left: m, right: m },
+        tableLineColor: PDF_LINE_SUBTLE,
+        tableLineWidth: 0.08,
+        didParseCell: (data) => {
+          if (data.section === "body") {
+            if (data.column.index === 0 && data.row.index < 3) {
+              data.cell.styles.fontStyle = "bold";
+            }
+            if (data.column.index === 1 && data.row.index < 3) {
+              data.cell.styles.fontStyle = "bold";
+            }
+          }
+        },
       });
     }
-    y = doc.lastAutoTable?.finalY != null ? doc.lastAutoTable.finalY + 14 : y;
+    y = doc.lastAutoTable?.finalY != null ? doc.lastAutoTable.finalY + 16 : y;
   }
 
   const schedSections = buildPdfScheduleSections(matches, activeLevels);
+  const JORNADA_GAP_MM = 20;
   if (schedSections.length) {
-    let ySch = y;
-    const bumpPage = () => {
-      if (ySch > pageH - 42) {
+    let ySch = y + 4;
+    const bumpPage = (needed = 48) => {
+      if (ySch > pageH - needed) {
         doc.addPage();
         paintWhitePage();
         doc.setTextColor(0, 0, 0);
         ySch = m;
       }
     };
-    bumpPage();
+    bumpPage(50);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text("Partidos por jornada", m, ySch);
-    ySch += 10;
+    doc.setFontSize(12.5);
+    doc.setTextColor(28, 35, 42);
+    doc.text("Calendario de partidos", m, ySch);
+    ySch += 5;
+    doc.setDrawColor(...PDF_LINE_SUBTLE);
+    doc.setLineWidth(0.35);
+    doc.line(m, ySch, pageW - m, ySch);
+    ySch += 11;
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
+    doc.setFontSize(8.5);
+    doc.setTextColor(75, 78, 84);
+    doc.text("Por jornada. Marcador solo si el resultado esta completo.", m, ySch);
+    ySch += 10;
+    doc.setTextColor(0, 0, 0);
 
     for (const sec of schedSections) {
-      bumpPage();
+      bumpPage(52);
+      doc.setFillColor(...PDF_ROW_ALT);
+      doc.rect(m, ySch - 4, pageW - 2 * m, 8, "F");
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
-      doc.text(pdfSafeText(sec.title), m, ySch);
-      ySch += 7;
+      doc.setTextColor(28, 35, 42);
+      doc.text(pdfSafeText(sec.title.toUpperCase()), m + 2, ySch + 1.5);
+      ySch += 12;
       doc.setFont("helvetica", "normal");
+      doc.setTextColor(0, 0, 0);
 
-      for (const round of sec.rounds) {
-        bumpPage();
+      for (let ri = 0; ri < sec.rounds.length; ri++) {
+        const round = sec.rounds[ri];
+        bumpPage(56);
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(9);
+        doc.setFontSize(9.5);
+        doc.setTextColor(45, 52, 60);
         doc.text(pdfSafeText(`Jornada ${round.jornada}`), m, ySch);
-        ySch += 6;
+        ySch += 9;
         doc.setFont("helvetica", "normal");
+        doc.setTextColor(0, 0, 0);
+
+        const scheduleBody = round.rows.map((mm) => [
+          pdfSafeText(mm.level),
+          pairPdfLabel(mm.pair1),
+          pairPdfLabel(mm.pair2),
+          pdfMatchResultLabel(mm),
+        ]);
 
         autoTable(doc, {
           startY: ySch,
-          head: [["Nivel", "Pareja A", "Pareja B", "Marcador"]],
-          body: round.rows.map((mm) => [
-            pdfSafeText(mm.level),
-            pairPdfLabel(mm.pair1),
-            pairPdfLabel(mm.pair2),
-            mm.played ? pdfSafeText(`${mm.score1} - ${mm.score2}`) : "-",
-          ]),
-          theme: "grid",
+          head: [["Cat.", "Local / Pareja A", "Visitante / Pareja B", "Marcador"]],
+          body: scheduleBody,
+          theme: "plain",
           styles: {
-            fontSize: 8,
-            cellPadding: 1.2,
-            textColor: [0, 0, 0],
+            fontSize: 8.5,
+            cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 },
+            textColor: [22, 24, 28],
             fillColor: [255, 255, 255],
-            lineColor: [190, 190, 190],
-            lineWidth: 0.05,
+            lineColor: PDF_LINE_SUBTLE,
+            lineWidth: 0.08,
+            valign: "middle",
           },
           headStyles: {
-            fillColor: [240, 240, 240],
-            textColor: [0, 0, 0],
+            fillColor: PDF_TABLE_HEAD_BG,
+            textColor: PDF_TABLE_HEAD_TEXT,
             fontStyle: "bold",
+            cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 },
           },
+          alternateRowStyles: { fillColor: PDF_ROW_ALT },
           columnStyles: {
-            0: { halign: "center", cellWidth: 12 },
-            1: { cellWidth: 58 },
-            2: { cellWidth: 58 },
-            3: { halign: "center", cellWidth: 22 },
+            0: { halign: "center", cellWidth: 11 },
+            1: { cellWidth: 56 },
+            2: { cellWidth: 56 },
+            3: { halign: "center", cellWidth: 24, fontStyle: "normal" },
           },
           margin: { left: m, right: m },
+          tableLineColor: PDF_LINE_SUBTLE,
+          tableLineWidth: 0.08,
+          didParseCell: (data) => {
+            if (data.section !== "body") return;
+            const mm = round.rows[data.row.index];
+            if (!mm) return;
+            const complete = pdfMatchScoreComplete(mm);
+            const s1 = complete ? parseInt(String(mm.score1).trim(), 10) : NaN;
+            const s2 = complete ? parseInt(String(mm.score2).trim(), 10) : NaN;
+            const defaultBody = [22, 24, 28];
+
+            if (data.column.index === 3) {
+              if (complete) {
+                data.cell.styles.fontStyle = "bold";
+                data.cell.styles.textColor = [18, 20, 24];
+              } else {
+                data.cell.styles.fontStyle = "normal";
+                data.cell.styles.textColor = PDF_TEXT_MUTED;
+              }
+              return;
+            }
+
+            if (!complete || data.column.index < 1 || data.column.index > 2) return;
+
+            if (s1 === s2) {
+              data.cell.styles.fontStyle = "normal";
+              data.cell.styles.textColor = defaultBody;
+              return;
+            }
+            if (data.column.index === 1) {
+              if (s1 > s2) {
+                data.cell.styles.textColor = PDF_WIN_GREEN;
+                data.cell.styles.fontStyle = "bold";
+              } else {
+                data.cell.styles.textColor = defaultBody;
+                data.cell.styles.fontStyle = "normal";
+              }
+            } else if (data.column.index === 2) {
+              if (s2 > s1) {
+                data.cell.styles.textColor = PDF_WIN_GREEN;
+                data.cell.styles.fontStyle = "bold";
+              } else {
+                data.cell.styles.textColor = defaultBody;
+                data.cell.styles.fontStyle = "normal";
+              }
+            }
+          },
         });
-        ySch = doc.lastAutoTable.finalY + 10;
+        ySch = doc.lastAutoTable.finalY + JORNADA_GAP_MM;
+        if (ri < sec.rounds.length - 1) {
+          doc.setDrawColor(...PDF_LINE_SUBTLE);
+          doc.setLineWidth(0.15);
+          doc.line(m + 4, ySch - 6, pageW - m - 4, ySch - 6);
+        }
       }
+      ySch += 6;
     }
   }
 
@@ -1529,13 +1686,32 @@ export default function App() {
 
   const handleScoreChange = (matchId, field, val) => {
     setMatches((prev) =>
-      prev.map((m) => m.id === matchId ? { ...m, [field]: val } : m)
+      prev.map((m) => {
+        if (m.id !== matchId) return m;
+        const draft = { ...m, [field]: val };
+        const { score1, score2 } = normalizedScoresFromFields(draft.score1, draft.score2);
+        return { ...draft, score1, score2 };
+      })
+    );
+  };
+
+  const handleMatchScoreBlur = (matchId) => {
+    setMatches((prev) =>
+      prev.map((m) => {
+        if (m.id !== matchId || m.played) return m;
+        const { score1, score2 } = normalizedScoresFromFields(m.score1, m.score2);
+        return { ...m, score1, score2 };
+      })
     );
   };
 
   const handleSaveScore = (matchId) => {
     setMatches((prev) =>
-      prev.map((m) => m.id === matchId ? { ...m, played: true } : m)
+      prev.map((m) => {
+        if (m.id !== matchId) return m;
+        const { score1, score2 } = normalizedScoresFromFields(m.score1, m.score2);
+        return { ...m, score1, score2, played: true };
+      })
     );
     showToast("💾 Resultado guardado");
   };
@@ -1591,6 +1767,7 @@ export default function App() {
               placeholder="0"
               value={m.score1}
               onChange={(e) => handleScoreChange(m.id, "score1", e.target.value)}
+              onBlur={() => handleMatchScoreBlur(m.id)}
             />
             <span className="score-sep">-</span>
             <input
@@ -1600,6 +1777,7 @@ export default function App() {
               placeholder="0"
               value={m.score2}
               onChange={(e) => handleScoreChange(m.id, "score2", e.target.value)}
+              onBlur={() => handleMatchScoreBlur(m.id)}
             />
             <button type="button" className="btn-save" onClick={() => handleSaveScore(m.id)}>
               Guardar resultado
