@@ -4,6 +4,81 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { loadPdfFonts } from "../lib/pdf/fonts.js";
 
+const LS_TOURNAMENT_META_KEY = "padel:tournament:meta";
+// Implementacion temporal para demo local: sustituir por persistencia real (Supabase) para entorno SaaS multiusuario.
+
+function safeJsonParse(s) {
+  if (typeof s !== "string" || !s.trim()) return null;
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+function loadTournamentMeta() {
+  const raw = safeJsonParse(globalThis?.localStorage?.getItem?.(LS_TOURNAMENT_META_KEY));
+  const code = typeof raw?.code === "string" && raw.code.trim() ? raw.code.trim() : null;
+  const isPublic = typeof raw?.isPublic === "boolean" ? raw.isPublic : false;
+  return { code, isPublic };
+}
+
+function generateTournamentCode(len = 8) {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // sin 0/O/I/1
+  const bytes = new Uint8Array(len);
+  globalThis.crypto?.getRandomValues?.(bytes);
+  let out = "";
+  for (let i = 0; i < len; i++) out += alphabet[(bytes[i] ?? Math.floor(Math.random() * 256)) % alphabet.length];
+  return out;
+}
+
+function buildPublicTournamentUrl(code) {
+  if (!code) return "";
+  const origin = globalThis?.location?.origin ?? "";
+  return origin ? `${origin}/torneo/${encodeURIComponent(code)}` : `/torneo/${encodeURIComponent(code)}`;
+}
+
+function getPublicRouteCodeFromLocation() {
+  const path = globalThis?.location?.pathname ?? "";
+  const m = path.match(/^\/torneo\/([^/?#]+)/i);
+  const code = m?.[1] ? decodeURIComponent(m[1]) : null;
+  return code && typeof code === "string" ? code : null;
+}
+
+function readTournamentSnapshot(code) {
+  if (!code) return null;
+  const codigo = code;
+  console.log("LEYENDO:", codigo);
+  const snapshot = localStorage.getItem(`torneo-${codigo}`);
+  return safeJsonParse(snapshot);
+}
+
+function writeTournamentSnapshot(code, snapshot) {
+  if (!code || !snapshot) return;
+  const codigo = code;
+  console.log("GUARDANDO:", codigo);
+  try {
+    localStorage.setItem(`torneo-${codigo}`, JSON.stringify(snapshot));
+  } catch {
+    // ignore
+  }
+}
+
+function isTournamentPubliclyVisible(snapshot) {
+  return Boolean(snapshot && snapshot.public === true);
+}
+
+function formatEsLongDate(d) {
+  const x = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(x.getTime())) return "";
+  return x.toLocaleDateString("es-ES", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
 // ─── STYLES ───────────────────────────────────────────────────────────────────
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap');
@@ -128,6 +203,70 @@ const styles = `
     text-overflow: ellipsis;
     max-width: min(360px, 32vw);
   }
+
+  /* Vista pública: cabecera oficial (tipo exportación PDF) */
+  .public-event-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 20px 22px;
+    margin: 0 0 20px 0;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: rgba(10,10,10,0.65);
+    backdrop-filter: blur(10px);
+  }
+  .public-event-header-slot {
+    flex: 0 0 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+  }
+  .public-event-logo {
+    max-height: 40px;
+    max-width: 120px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: 6px;
+    display: block;
+  }
+  .public-event-header-center {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .public-event-title-main {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(22px, 4.2vw, 30px);
+    letter-spacing: 2px;
+    color: var(--green);
+    line-height: 1.15;
+    margin: 0;
+    padding: 0 8px;
+    word-break: break-word;
+  }
+  .public-event-date-line {
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    line-height: 1.35;
+    text-transform: capitalize;
+  }
+  .public-event-rebo-fallback {
+    font-size: 28px;
+    line-height: 1;
+    opacity: 0.85;
+  }
+
   .logo {
     font-family: 'Bebas Neue', sans-serif;
     font-size: 26px;
@@ -195,6 +334,20 @@ const styles = `
   }
   .nav-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
   .nav-btn.active { background: var(--green); color: #000; font-weight: 600; }
+
+  /* Toggle */
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .toggle-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .toggle-title { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; }
+  .toggle-sub { font-size: 12px; color: var(--muted); line-height: 1.35; }
+  .toggle-pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); flex-shrink: 0; }
+  .toggle-pill strong { font-size: 12px; }
+  .toggle-switch { position: relative; width: 44px; height: 26px; border-radius: 999px; border: 1px solid var(--border); background: rgba(255,255,255,0.06); cursor: pointer; flex-shrink: 0; }
+  .toggle-switch[data-on="true"] { background: rgba(0,230,118,0.25); border-color: rgba(0,230,118,0.45); }
+  .toggle-knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 999px; background: #fff; transition: transform 0.18s ease; }
+  .toggle-switch[data-on="true"] .toggle-knob { transform: translateX(18px); background: #00E676; }
+  .share-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-top: 12px; }
+  .share-url { font-size: 12px; color: var(--text); background: rgba(0,0,0,0.18); border: 1px solid var(--border); padding: 10px 12px; border-radius: 10px; flex: 1; min-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* MAIN */
   .main {
@@ -740,6 +893,7 @@ function makeMatch(phase, level, pair1, pair2) {
     score2: "",
     played: false,
     jornada: 0,
+    pista: "",
   };
 }
 
@@ -1042,6 +1196,7 @@ function generateGroupMatches(pairs) {
           score2: "",
           played: false,
           jornada: 0,
+          pista: "",
         });
       }
     }
@@ -1238,23 +1393,23 @@ function paintPdfPageWhite(doc, pageW, pageH) {
   doc.rect(0, 0, pageW, pageH, "F");
 }
 
-/** Cabecera: logo marca (izq), torneo y fecha centrados, logo evento (der). Devuelve Y donde empieza el cuerpo. */
+/** Cabecera: logo organización (izq), torneo + fecha centrados, logo ReBoTech (der). Devuelve Y donde empieza el cuerpo. */
 function drawPdfReportHeader(doc, h) {
   const { pageW, m, displayTitle, dateLine, logoDataUrl, eventLogoBox, rebotechDataUrl, rebotechBox } = h;
   doc.setTextColor(0, 0, 0);
   let headerImgH = 11;
-  if (rebotechBox && rebotechDataUrl) {
+  if (eventLogoBox && logoDataUrl) {
     try {
-      doc.addImage(rebotechDataUrl, rebotechBox.format, m, m, rebotechBox.w, rebotechBox.h);
-      headerImgH = Math.max(headerImgH, rebotechBox.h);
+      doc.addImage(logoDataUrl, eventLogoBox.format, m, m, eventLogoBox.w, eventLogoBox.h);
+      headerImgH = Math.max(headerImgH, eventLogoBox.h);
     } catch (_) {
       /* ignore */
     }
   }
-  if (eventLogoBox && logoDataUrl) {
+  if (rebotechBox && rebotechDataUrl) {
     try {
-      doc.addImage(logoDataUrl, eventLogoBox.format, pageW - m - eventLogoBox.w, m, eventLogoBox.w, eventLogoBox.h);
-      headerImgH = Math.max(headerImgH, eventLogoBox.h);
+      doc.addImage(rebotechDataUrl, rebotechBox.format, pageW - m - rebotechBox.w, m, rebotechBox.w, rebotechBox.h);
+      headerImgH = Math.max(headerImgH, rebotechBox.h);
     } catch (_) {
       /* ignore */
     }
@@ -1617,8 +1772,12 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
   const displayTitle = pdfUtf8Text((branding?.tournamentName ?? "").trim() || "Pádel Manager");
   const logoDataUrl = branding?.logoDataUrl ?? "";
   const rebotechDataUrl = await fetchPublicImageAsDataUrl("/ReBoTech_logo.jpg");
-  const eventLogoBox = logoDataUrl ? await getPdfLogoSizeMm(logoDataUrl, 32, 17) : null;
-  const rebotechBox = rebotechDataUrl ? await getPdfLogoSizeMm(rebotechDataUrl, 36, 14) : null;
+  const PDF_HEADER_LOGO_MAX_W = 32;
+  const PDF_HEADER_LOGO_MAX_H = 17;
+  const eventLogoBox = logoDataUrl ? await getPdfLogoSizeMm(logoDataUrl, PDF_HEADER_LOGO_MAX_W, PDF_HEADER_LOGO_MAX_H) : null;
+  const rebotechBox = rebotechDataUrl
+    ? await getPdfLogoSizeMm(rebotechDataUrl, PDF_HEADER_LOGO_MAX_W, PDF_HEADER_LOGO_MAX_H)
+    : null;
 
   const dateLine = pdfUtf8Text(
     new Date().toLocaleDateString("es-ES", {
@@ -1657,7 +1816,7 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
 
   const bottomLimit = pageH - PDF_BODY_BOTTOM_MM;
   const maxPdfColH = bottomLimit - m - 26;
-  const headClasif = [["Pos", "Pareja", "Empresa", "PJ", "G", "E", "P", "GF", "GC", "Pts"]];
+  const headClasif = [["Pos", "Pareja", "Empresa", "PJ", "G", "E", "P", "F", "C", "Pts"]];
 
   // --- Sección 1: Clasificación ---
   let y = openPage();
@@ -1820,12 +1979,16 @@ async function exportClasificacionPdf(standings, branding, activeLevels, matches
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
+  const [publicRouteCode, setPublicRouteCode] = useState(() => getPublicRouteCodeFromLocation());
   const importFileRef = useRef(null);
   const [tab, setTab] = useState("inscripcion");
   const [players, setPlayers] = useState([]);
   const [pairs, setPairs] = useState([]);
   const [matches, setMatches] = useState([]);
   const [toast, setToast] = useState(null);
+  const initialMeta = useMemo(() => loadTournamentMeta(), []);
+  const [tournamentCode, setTournamentCode] = useState(() => initialMeta.code ?? generateTournamentCode());
+  const [isPublicTournament, setIsPublicTournament] = useState(() => initialMeta.isPublic ?? false);
   const [config, setConfig] = useState({
     courts: 1,
     matchDuration: MATCH_FORMAT_MINUTES["1set"],
@@ -1836,6 +1999,7 @@ export default function App() {
   const [tournamentName, setTournamentName] = useState("");
   const [logoDataUrl, setLogoDataUrl] = useState("");
   const [rebotechLogoBroken, setRebotechLogoBroken] = useState(false);
+  const [publicHeaderRebotechBroken, setPublicHeaderRebotechBroken] = useState(false);
   const logoFileRef = useRef(null);
   const [form, setForm] = useState({
     nombre: "", apellidos: "", telefono: "", empresa: "", email: "", nivel: "B", pairWith: "",
@@ -1898,10 +2062,249 @@ export default function App() {
     );
   }, [config.levelCount]);
 
+  useEffect(() => {
+    const onRouteChange = () => setPublicRouteCode(getPublicRouteCodeFromLocation());
+    globalThis?.addEventListener?.("popstate", onRouteChange);
+    globalThis?.addEventListener?.("hashchange", onRouteChange);
+    return () => {
+      globalThis?.removeEventListener?.("popstate", onRouteChange);
+      globalThis?.removeEventListener?.("hashchange", onRouteChange);
+    };
+  }, []);
+
   const showToast = (msg) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
   };
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_TOURNAMENT_META_KEY, JSON.stringify({ code: tournamentCode, isPublic: isPublicTournament }));
+    } catch {
+      // ignore
+    }
+  }, [tournamentCode, isPublicTournament]);
+
+  const handleTogglePublicTournament = async () => {
+    const next = !isPublicTournament;
+    if (next && players.length === 0) {
+      showToast("⚠️ Añade al menos un jugador antes de activar Público");
+      return;
+    }
+    setIsPublicTournament(next);
+    if (next) {
+      showToast("Este torneo ya es visible para jugadores");
+      return;
+    }
+  };
+
+  const handleCopyPublicLink = async () => {
+    const url = buildPublicTournamentUrl(tournamentCode);
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast("Enlace copiado");
+    } catch {
+      showToast("No se pudo copiar el enlace");
+    }
+  };
+
+  const renderPublicTournamentRoute = (routeCode) => {
+    const codigo = routeCode;
+    const raw = localStorage.getItem(`torneo-${codigo}`);
+    console.log("RAW:", raw);
+    let snapshot = null;
+    try {
+      snapshot = raw ? JSON.parse(raw) : null;
+    } catch {
+      snapshot = null;
+    }
+    console.log("SNAPSHOT:", snapshot);
+    console.log("SNAPSHOT PUBLICO:", snapshot);
+    if (!snapshot) {
+      return (
+        <div className="app">
+          <style>{styles}</style>
+          <div className="main">
+            <div className="card" style={{ padding: 18 }}>
+              <h3 style={{ marginBottom: 8 }}>Este torneo no está disponible o aún no se ha publicado</h3>
+              <div style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.5 }}>
+                Si eres el organizador, activa <strong>Público</strong> en el panel para hacerlo visible.
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (snapshot.public === false) {
+      return (
+        <div className="app">
+          <style>{styles}</style>
+          <div className="main">
+            <div className="card" style={{ padding: 18 }}>
+              <h3 style={{ marginBottom: 8 }}>Este torneo no está disponible o aún no se ha publicado</h3>
+              <div style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.5 }}>
+                Si eres el organizador, activa <strong>Público</strong> en el panel para hacerlo visible.
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const snapshotPlayers = Array.isArray(snapshot.players) ? snapshot.players : [];
+    const snapshotPairs = Array.isArray(snapshot.pairs) ? snapshot.pairs : [];
+    const snapshotMatches = Array.isArray(snapshot.matches) ? snapshot.matches : [];
+    const snapshotRanking = snapshot?.ranking && typeof snapshot.ranking === "object" ? snapshot.ranking : {};
+    const hasRankingRows = Object.values(snapshotRanking).some((rows) => Array.isArray(rows) && rows.length > 0);
+    const hasCoreData = snapshotPlayers.length > 0 || snapshotPairs.length > 0 || snapshotMatches.length > 0 || hasRankingRows;
+
+    const publicName = typeof snapshot?.tournamentName === "string" ? snapshot.tournamentName : "";
+    const dateLine =
+      (typeof snapshot?.tournamentDate === "string" && snapshot.tournamentDate.trim()) ||
+      (snapshot?.savedAt != null ? formatEsLongDate(new Date(snapshot.savedAt)) : formatEsLongDate(new Date()));
+    const orgLogoUrl = typeof snapshot?.logoDataUrl === "string" ? snapshot.logoDataUrl.trim() : "";
+    const hasOrgLogo = Boolean(orgLogoUrl);
+    const clasificacionMatches = snapshotMatches.filter((m) => m?.phase === "clasificacion");
+    const groupMatches = snapshotMatches.filter((m) => m?.phase === "group");
+    const renderPublicMatch = (m) => {
+      const p1 = m?.pair1?.p1 ? `${m.pair1.p1.nombre} ${m.pair1.p1.apellidos}` : "Pareja 1";
+      const p2 = m?.pair2?.p1 ? `${m.pair2.p1.nombre} ${m.pair2.p1.apellidos}` : "Pareja 2";
+      const isPlayed = m?.played === true;
+      const score1 = String(m?.score1 ?? "").trim();
+      const score2 = String(m?.score2 ?? "").trim();
+      const hasScore = score1 !== "" && score2 !== "";
+      const showScore = isPlayed && hasScore;
+      const pistaRaw = String(m?.pista ?? m?.court ?? "").trim();
+      const jornadaNum = m?.jornada ?? "—";
+      const metaLine = `Jornada ${jornadaNum} · ${pistaRaw ? `Pista ${pistaRaw}` : "Pista —"}`;
+      return (
+        <div key={m.id ?? `${m.phase}-${m.jornada}-${m.pair1?.id ?? "a"}-${m.pair2?.id ?? "b"}`} className="card" style={{ padding: 14, marginBottom: 10 }}>
+          <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.35, marginBottom: 6 }}>
+            {p1} <span style={{ color: "var(--muted)", fontWeight: 500 }}>vs</span> {p2}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
+            {metaLine}
+          </div>
+          <div
+            style={{
+              textAlign: "center",
+              fontWeight: 700,
+              letterSpacing: "0.02em",
+              ...(showScore
+                ? { fontSize: 28, color: "var(--green)", lineHeight: 1.2 }
+                : { fontSize: 13, color: "var(--muted)", lineHeight: 1.3 }),
+            }}
+          >
+            {showScore ? `${score1} - ${score2}` : "Pendiente"}
+          </div>
+        </div>
+      );
+    };
+
+    return (
+      <div className="app">
+        <style>{styles}</style>
+        <div className="main">
+          <header className="public-event-header" aria-label="Cabecera del torneo">
+            <div className="public-event-header-slot public-event-header-slot--left" aria-hidden={!hasOrgLogo}>
+              {hasOrgLogo ? (
+                <img src={orgLogoUrl} alt="" className="public-event-logo" />
+              ) : (
+                <span style={{ width: 1, height: 1, overflow: "hidden", opacity: 0 }}> </span>
+              )}
+            </div>
+            <div className="public-event-header-center">
+              <h1 className="public-event-title-main">{(publicName || "").trim() || "Torneo"}</h1>
+              {dateLine ? <div className="public-event-date-line">{dateLine}</div> : null}
+            </div>
+            <div className="public-event-header-slot public-event-header-slot--right">
+              {!publicHeaderRebotechBroken ? (
+                <img
+                  src="/ReBoTech_logo.jpg"
+                  alt=""
+                  className="public-event-logo"
+                  width={100}
+                  height={36}
+                  onError={() => setPublicHeaderRebotechBroken(true)}
+                />
+              ) : (
+                <span className="public-event-rebo-fallback" aria-hidden>
+                  🎾
+                </span>
+              )}
+            </div>
+          </header>
+
+          {!hasCoreData && (
+            <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+              <h3 style={{ marginBottom: 8 }}>Aún no hay datos publicados</h3>
+              <div style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.5 }}>
+                El torneo está en público, pero todavía no hay jugadores, partidos o ranking en el snapshot.
+              </div>
+            </div>
+          )}
+
+          {hasRankingRows && (
+            <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+              <div className="section-title" style={{ marginBottom: 10 }}>Ranking</div>
+              {Object.entries(snapshotRanking).map(([lvl, rows]) => {
+                if (!Array.isArray(rows) || rows.length === 0) return null;
+                return (
+                  <div key={lvl} style={{ marginBottom: 14 }}>
+                    <div className="phase-title">Nivel {lvl}</div>
+                    <table className="standings-table">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Pareja</th>
+                          <th style={{ textAlign: "center" }}>Pts</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((row, i) => (
+                          <tr key={row?.pair?.id ?? `${lvl}-${i}`}>
+                            <td>{i + 1}</td>
+                            <td>
+                              <div style={{ fontWeight: 600 }}>{row?.pair?.p1?.nombre} {row?.pair?.p1?.apellidos}</div>
+                              {row?.pair?.p2 ? <div style={{ fontSize: 12, color: "var(--muted)" }}>{row.pair.p2.nombre} {row.pair.p2.apellidos}</div> : null}
+                            </td>
+                            <td style={{ textAlign: "center" }}>{row?.pts ?? 0}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {snapshotMatches.length > 0 && (
+            <div className="card" style={{ padding: 18 }}>
+              <div className="section-title" style={{ marginBottom: 10 }}>Cruces y jornadas</div>
+              {clasificacionMatches.length > 0 && (
+                <>
+                  <div className="phase-title">Clasificación</div>
+                  {clasificacionMatches.map((m) => renderPublicMatch(m))}
+                </>
+              )}
+              {groupMatches.length > 0 && (
+                <>
+                  <div className="phase-title" style={{ marginTop: 16 }}>Grupos</div>
+                  {groupMatches.map((m) => renderPublicMatch(m))}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  if (publicRouteCode) {
+    return renderPublicTournamentRoute(publicRouteCode);
+  }
 
   const handleTournamentNameChange = (e) => {
     const v = e.target?.value;
@@ -2497,6 +2900,12 @@ export default function App() {
     showToast("💾 Resultado guardado");
   };
 
+  const handleMatchPistaChange = (matchId, val) => {
+    setMatches((prev) =>
+      prev.map((m) => (m.id === matchId ? { ...m, pista: typeof val === "string" ? val : String(val ?? "") } : m))
+    );
+  };
+
   const clasificacionJornadas = useMemo(
     () => buildJornadaRounds(matches, "clasificacion", activeLevels),
     [matches, activeLevels.join("")]
@@ -2523,6 +2932,40 @@ export default function App() {
             {matchPhaseLabel(m.phase)} · {lvl}
           </span>
           {m.played && <span style={{ color: "var(--green)", fontSize: 12, fontWeight: 700 }}>✓ Jugado</span>}
+        </div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+            marginBottom: 10,
+            padding: "6px 0",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          <label htmlFor={`pista-${m.id}`} style={{ fontSize: 12, color: "var(--muted)", fontWeight: 600, flexShrink: 0 }}>
+            Pista
+          </label>
+          <input
+            id={`pista-${m.id}`}
+            type="text"
+            autoComplete="off"
+            placeholder="ej. 1, A, Central"
+            value={m.pista ?? ""}
+            onChange={(e) => handleMatchPistaChange(m.id, e.target.value)}
+            style={{
+              flex: "1 1 140px",
+              minWidth: 100,
+              maxWidth: 220,
+              padding: "6px 10px",
+              fontSize: 13,
+              borderRadius: 6,
+              border: "1px solid var(--border)",
+              background: "var(--surface)",
+              color: "var(--text)",
+            }}
+          />
         </div>
         <div className="match-teams">
           <div className="match-team">
@@ -2581,6 +3024,50 @@ export default function App() {
   };
 
   const standings = calcStandings(pairs, matches);
+  const snapshotFases = useMemo(
+    () => ({
+      tournamentStarted,
+      groupPhaseStarted,
+      clasificacion: { jornadas: clasificacionJornadas },
+      grupos: { jornadas: gruposJornadas },
+    }),
+    [tournamentStarted, groupPhaseStarted, clasificacionJornadas, gruposJornadas]
+  );
+  const snapshotPayload = useMemo(
+    () => ({
+      version: 1,
+      code: tournamentCode,
+      public: isPublicTournament,
+      tournamentName,
+      logoDataUrl,
+      tournamentDate: formatEsLongDate(new Date()),
+      players,
+      pairs,
+      matches,
+      ranking: standings,
+      fases: snapshotFases,
+      config,
+      savedAt: Date.now(),
+    }),
+    [
+      tournamentCode,
+      isPublicTournament,
+      tournamentName,
+      logoDataUrl,
+      players,
+      pairs,
+      matches,
+      standings,
+      snapshotFases,
+      config,
+    ]
+  );
+
+  useEffect(() => {
+    if (!tournamentCode) return;
+    writeTournamentSnapshot(tournamentCode, snapshotPayload);
+    console.log("SNAPSHOT ACTUALIZADO:", snapshotPayload);
+  }, [tournamentCode, snapshotPayload]);
 
   const pairLabel = (pair) =>
     pair.p2
@@ -3235,6 +3722,62 @@ export default function App() {
                     onChange={handleTournamentNameChange}
                   />
                 </div>
+
+                <div className="form-group full" style={{ marginBottom: 16 }}>
+                  <div style={{ marginBottom: 10, fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
+                    <div><strong style={{ color: "var(--text)" }}>Modo actual: demo local</strong></div>
+                    <div>El enlace público funciona con snapshot local hasta conectar backend real.</div>
+                  </div>
+                  <div className="toggle-row">
+                    <div className="toggle-meta">
+                      <div className="toggle-title">Público ON / OFF</div>
+                      <div className="toggle-sub">
+                        {isPublicTournament ? (
+                          <>Accesible por enlace/QR (solo lectura).</>
+                        ) : (
+                          <>No accesible por enlace/QR.</>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="toggle-pill" title={isPublicTournament ? "Público" : "Privado"}>
+                      <strong>{isPublicTournament ? "Público" : "Privado"}</strong>
+                    </div>
+
+                    <div
+                      className="toggle-switch"
+                      data-on={String(isPublicTournament)}
+                      role="switch"
+                      aria-checked={isPublicTournament}
+                      tabIndex={0}
+                      onClick={handleTogglePublicTournament}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          handleTogglePublicTournament();
+                        }
+                      }}
+                      aria-label="Cambiar visibilidad pública del torneo"
+                    >
+                      <div className="toggle-knob" />
+                    </div>
+                  </div>
+
+                  <div className="share-row">
+                    <div className="share-url" title={buildPublicTournamentUrl(tournamentCode)}>
+                      {buildPublicTournamentUrl(tournamentCode)}
+                    </div>
+                    <button type="button" className="btn-secondary" onClick={handleCopyPublicLink}>
+                      Copiar enlace
+                    </button>
+                  </div>
+                  {!isPublicTournament && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
+                      Aunque tengas el enlace, los jugadores verán <strong>“Este torneo no está disponible o aún no se ha publicado”</strong> mientras esté en modo <strong>Privado</strong>.
+                    </div>
+                  )}
+                </div>
+
                 <div className="form-group full">
                   <div style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 6 }}>
                     Logo
